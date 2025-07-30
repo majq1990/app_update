@@ -1,0 +1,66 @@
+ansible_ssh_pass: ''
+ansible_ssh_port: 22
+ansible_user: root
+is_checked_successful: false
+webs:
+- log_dir: WEB-INF/log
+  master:
+  - check_uri: /eUrbanMIS/main.htm
+    group: egova
+    host: 10.2.0.172
+    service_port: 8081
+    start_cmd: systemctl start tomcat-MIS
+    stop_cmd: systemctl stop tomcat-MIS
+    user: egova
+    web_path: /egova/web/eUrbanMIS
+  master_exclusive_files:
+  - egova-liquibase-[0-9]*.[0-9]*.[0-9]*.jar
+  - egova-jobmanager-[0-9]*.[0-9]*.[0-9]*.jar
+  middle_type: tomcat
+  retained_config_file:
+  - WEB-INF/classes/jdbc.properties
+  - WEB-INF/classes/redis.properties
+  static_page_group:
+  - check_uri: ''
+    group: nginx
+    host: 10.2.0.172
+    service_port: 0
+    start_cmd: ''
+    stop_cmd: ''
+    user: nginx
+    web_path: /egova/web/nginx_deploy/eUrbanMIS/
+  update:
+  - check_uri: /eUrbanMIS/main.htm
+    group: egova
+    host: 10.2.0.173
+    service_port: 8081
+    start_cmd: systemctl start tomcat-MIS
+    stop_cmd: systemctl stop tomcat-MIS
+    user: egova
+    web_path: /egova/web/eUrbanMIS
+  web: eUrbanMIS
+- log_dir: WEB-INF/logs
+  master:
+  - check_uri: /eUrbanGIS/symbol/default.png
+    group: egova
+    host: 10.2.0.172
+    service_port: 8085
+    start_cmd: systemctl stop tomcat-GIS
+    static_page_path: ''
+    stop_cmd: systemctl stop tomcat-GIS
+    user: egova
+    web_path: /egova/web/eUrbanGIS
+  master_exclusive_files:
+  - WEB-INF/classes/jdbc.properties
+  - WEB-INF/classes/redis.properties
+  middle_type: tomcat
+  retained_config_file:
+  - WEB-INF/classes/jdbc.properties
+  - WEB-INF/classes/redis.properties
+  static_page_group:
+  - group: nginx
+    host: 10.2.0.172
+    user: nginx
+    web_path: /egova/web/nginx_deploy/eUrbanGIS
+  update: []
+  web: eUrbanGIS
