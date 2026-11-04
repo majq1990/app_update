@@ -2,7 +2,7 @@
 
 Java 应用更新工具（Go 版）——通过 SSH 自动化 Java 应用（Tomcat WAR / 独立 JAR）的**更新与回滚**，替代早期 Python+Bash+Docker 实现。
 
-> 旧版 Python 实现已归档到 [`legacy-python/`](legacy-python/) 目录，保留完整历史以便对照。
+> 旧版 Python 实现完整保留在 [`legacy-python-archive`](https://github.com/majq1990/app_update/tree/legacy-python-archive) 分支（含全部历史提交），该分支已废弃不再维护，仅作对照。
 
 ## 特性
 
