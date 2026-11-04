@@ -14,6 +14,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"path"
 	"strings"
 	"time"
@@ -361,7 +362,7 @@ func (r *Runner) Update(appName string, groups []string) (*Summary, error) {
 			// 2. 备份远端 → 本地（排除日志；传输明细按应用类型走 detailFor：tomcat 只进日志文件）
 			backupPath := path.Join(r.backupDir(), appName, ts, h.Host, appName)
 			if res, err := syncx.Pull(conn, h.WebPath, backupPath, syncx.Options{
-				Excludes: append(globalExcludes(r.Cfg), logDirPatterns(app)...),
+				Excludes: r.appExcludePatterns(app),
 				DryRun:   r.DryRun,
 				Logf:     r.detailFor(app, false),
 			}); err != nil {
@@ -374,7 +375,7 @@ func (r *Runner) Update(appName string, groups []string) (*Summary, error) {
 
 			// 3. 覆盖式同步新代码（无 --delete；排除日志/保留配置；tomcat update 群组额外排除 master 专属文件，
 			//    并把目标端已存在的 master 专属文件清理掉——如 liquibase jar，备节点跑它有数据库锁冲突风险）
-			excludes := append(logDirPatterns(app), app.RetainedConfigFile...)
+			excludes := append(r.appExcludePatterns(app), app.RetainedConfigFile...)
 			pushOpt := syncx.Options{
 				Excludes: excludes,
 				Retain:   app.RetainedConfigFile,
@@ -444,13 +445,27 @@ func (r *Runner) Rollback(appName, version string, groups []string) (*Summary, e
 		r.logf("未指定版本，使用最新备份: %s", version)
 	}
 	if !dirExists(path.Join(appBackupRoot, version)) {
-		return nil, fmt.Errorf("备份版本不存在: %s（可用目录: %s）", version, appBackupRoot)
+		// 兼容压缩包备份（<版本>.tar.gz）
+		if _, err := os.Stat(path.Join(appBackupRoot, version+".tar.gz")); err != nil {
+			return nil, fmt.Errorf("备份版本不存在: %s（既无目录也无 %s.tar.gz，路径: %s）", version, version, appBackupRoot)
+		}
 	}
 
 	sum := &Summary{App: appName, Version: version}
 	cache := r.dialer()
 	defer cache.close()
-	r.logf("--- 回滚应用 %s 到版本 %s ---", appName, version)
+
+	// 压缩包备份：解压到临时目录后作为还原源（一次性，多个群组共用）
+	versionDir, compressed, cleanup, err := ResolveBackupSource(r.backupDir(), appName, version)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+	if compressed {
+		r.logf("--- 回滚应用 %s 到版本 %s（压缩包备份，已解压到临时目录）---", appName, version)
+	} else {
+		r.logf("--- 回滚应用 %s 到版本 %s ---", appName, version)
+	}
 
 	for _, g := range groups {
 		hosts := app.GroupHosts(g)
@@ -469,11 +484,12 @@ func (r *Runner) Rollback(appName, version string, groups []string) (*Summary, e
 			}
 
 			// 备份源路径：static 群组用 nginx_deploy，master/update 用应用目录（含 JAR 修正：还原完整应用目录）
+			// 源基准目录 versionDir 指向未压缩目录或已解压的临时目录。
 			var backupSrc string
 			if g == GroupStatic {
-				backupSrc = path.Join(r.backupDir(), appName, version, h.Host, "nginx_deploy")
+				backupSrc = path.Join(versionDir, h.Host, "nginx_deploy")
 			} else {
-				backupSrc = path.Join(r.backupDir(), appName, version, h.Host, appName)
+				backupSrc = path.Join(versionDir, h.Host, appName)
 			}
 			if !dirExists(backupSrc) {
 				r.logf("      ❌ 该主机无此版本备份（%s），跳过", backupSrc)
@@ -488,12 +504,15 @@ func (r *Runner) Rollback(appName, version string, groups []string) (*Summary, e
 				}
 			}
 
-			// 全量还原（--delete 语义）。日志目录与全局排除项做删除保护：
-			// 备份不含日志，若无保护会把备份之后产生的运行期日志清掉（排查问题正需要它们）。
+			// 全量还原（--delete 语义）。删除保护：
+			//   - 日志目录与全局排除项：备份不含日志，无保护会清掉备份后产生的运行期日志；
+			//   - 保留配置（retained_config_file）：备份可能不含（如 .env 由 role 生成），
+			//     无保护会把现场 .env 删掉导致服务起不来（2026-11-04 实测踩坑）。
 			// 静态群组还原也按"静态传输"处理（明细只进日志文件）。
 			if res, err := syncx.Push(conn, backupSrc, h.WebPath, syncx.Options{
 				Delete:   true,
-				Excludes: append(globalExcludes(r.Cfg), logDirPatterns(app)...),
+				Excludes: r.appExcludePatterns(app),
+				Retain:   app.RetainedConfigFile,
 				DryRun:   r.DryRun,
 				Logf:     r.detailFor(app, g == GroupStatic),
 			}); err != nil {
@@ -546,29 +565,94 @@ func globalExcludes(cfg *config.Config) []string {
 }
 
 // logDirPatterns 日志目录排除模式（含尾 / 的目录模式，锚定与 basename 两种形式都被匹配器支持）。
+// tomcat 类应用默认同时排除 WEB-INF/log/ 与 WEB-INF/logs/（现场两种命名都存在），
+// 以及应用自定义的 log_dir。JAR 应用只排除 log_dir（默认 logs/）。
 func logDirPatterns(app *config.App) []string {
-	d := strings.Trim(strings.TrimSpace(app.LogDir), "/")
-	if d == "" {
-		return nil
+	var pats []string
+	seen := map[string]bool{}
+	add := func(p string) {
+		p = strings.Trim(strings.TrimSpace(p), "/")
+		if p == "" || seen[p] {
+			return
+		}
+		seen[p] = true
+		pats = append(pats, p+"/")
 	}
-	return []string{d + "/"}
+	if app.MiddleType == "tomcat" {
+		// 现场约定：WAR 日志目录单复数两种都有（旧版配置中同时出现过）
+		add("WEB-INF/log")
+		add("WEB-INF/logs")
+	}
+	add(app.LogDir)
+	return pats
+}
+
+// appExcludePatterns 应用级排除路径（exclude_paths）+ 日志目录 + 全局日志排除，用于备份与同步。
+func (r *Runner) appExcludePatterns(app *config.App) []string {
+	pats := append(globalExcludes(r.Cfg), logDirPatterns(app)...)
+	for _, p := range app.ExcludePaths {
+		p = strings.Trim(strings.TrimSpace(p), "/")
+		if p != "" {
+			pats = append(pats, p+"/")
+		}
+	}
+	return pats
 }
 
 // ListVersions 列出应用可回滚的备份版本（新→旧）。
+// 同时支持未压缩目录（<版本>/）与压缩包（<版本>.tar.gz），压缩包版本名去掉 .tar.gz 后缀。
 func ListVersions(backupDir, appName string) ([]string, error) {
 	root := path.Join(backupDir, appName)
 	entries, err := osReadDir(root)
 	if err != nil {
 		return nil, fmt.Errorf("没有找到应用 %q 的备份（%s）", appName, root)
 	}
+	seen := map[string]bool{}
 	var vs []string
 	for _, e := range entries {
+		name := e.Name()
 		if e.IsDir() {
-			vs = append(vs, e.Name())
+			if !seen[name] {
+				seen[name] = true
+				vs = append(vs, name)
+			}
+			continue
+		}
+		// 压缩包：<版本>.tar.gz
+		if strings.HasSuffix(name, ".tar.gz") {
+			v := strings.TrimSuffix(name, ".tar.gz")
+			if v != "" && !seen[v] {
+				seen[v] = true
+				vs = append(vs, v)
+			}
 		}
 	}
 	sortReverse(vs)
 	return vs, nil
+}
+
+// ResolveBackupSource 解析某应用某版本的备份来源：
+// 优先未压缩目录（backups/<应用>/<版本>），否则用压缩包（backups/<应用>/<版本>.tar.gz）。
+// 返回 (本地目录, 是否压缩包)。压缩包场景会把包解压到临时目录，调用方负责清理。
+func ResolveBackupSource(backupDir, appName, version string) (string, bool, func(), error) {
+	dir := path.Join(backupDir, appName, version)
+	if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
+		return dir, false, func() {}, nil
+	}
+	archive := path.Join(backupDir, appName, version+".tar.gz")
+	if _, err := os.Stat(archive); err != nil {
+		return "", false, nil, fmt.Errorf("备份版本不存在: %s（既无目录也无 %s.tar.gz）", version, version)
+	}
+	tmp, err := os.MkdirTemp("", "app-updater-restore-*")
+	if err != nil {
+		return "", false, nil, fmt.Errorf("创建临时目录: %w", err)
+	}
+	cleanup := func() { _ = os.RemoveAll(tmp) }
+	if err := ExtractTarGz(archive, tmp); err != nil {
+		cleanup()
+		return "", false, nil, fmt.Errorf("解压 %s: %w", archive, err)
+	}
+	return tmp, true, cleanup, nil
 }
 
 // HTTPHealth 默认健康检查：HTTP 200；空 URI 跳过（= 通过）。每 10s 轮询，单次请求 10s 超时。

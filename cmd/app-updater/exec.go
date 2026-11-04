@@ -47,6 +47,33 @@ func (d *execDialer) Close() {
 	}
 }
 
+// gateValidation 执行前的配置有效性闸门：
+// 有任何 error 级问题一律拒绝执行（dry-run 也拦，避免"计划看着正常、执行必失败"）。
+func gateValidation(cfg *config.Config, yes bool) error {
+	issues := cfg.Validate()
+	errs, warns := 0, 0
+	for _, is := range issues {
+		if is.Severity == "error" {
+			errs++
+		} else {
+			warns++
+		}
+	}
+	if errs == 0 {
+		if warns > 0 {
+			fmt.Printf("ℹ️ 配置校验通过（%d 个警告）\n", warns)
+		}
+		return nil
+	}
+	fmt.Printf("❌ 配置校验未通过：%d 个错误 / %d 个警告，已阻止执行\n\n", errs, warns)
+	for _, is := range issues {
+		fmt.Println(is.String())
+	}
+	fmt.Println("\n请先修正配置：交互菜单「3 配置管理」→ 10. 修改主机配置 / 3. 表格导入，")
+	fmt.Println("或直接编辑 config.yaml 后重试。")
+	return fmt.Errorf("配置存在 %d 个错误，拒绝执行", errs)
+}
+
 // newRunner 构造执行器（含 --pass/--key 环境变量兜底与 dry-run 提示）。
 func newRunner(cfg *config.Config, passFlag, keyFlag string, dryRun, yes bool) *appflow.Runner {
 	over := sshx.Auth{
@@ -74,6 +101,25 @@ type appLogger struct {
 }
 
 var appLog *appLogger
+
+// ensureWorkspace 首次运行时构建完整工作目录（幂等）：
+//
+//	工作目录/
+//	├── config.yaml          # 应用配置（不预创建，由识别/导入/人工生成）
+//	├── update/              # 更新包：update/<应用名>/...
+//	├── backups/             # 自动生成：回滚备份
+//	└── logs/                # 自动生成：操作日志
+func ensureWorkspace() []string {
+	var created []string
+	for _, d := range []string{"update", "backups", "logs"} {
+		if _, err := os.Stat(d); os.IsNotExist(err) {
+			if err := os.MkdirAll(d, 0o755); err == nil {
+				created = append(created, d)
+			}
+		}
+	}
+	return created
+}
 
 // getLogger 懒初始化日志文件（logs/app_updater_<日期>.log）。
 func getLogger() *appLogger {
@@ -233,6 +279,9 @@ func cmdUpdate(args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := gateValidation(cfg, *yes); err != nil {
+		return err
+	}
 
 	runner := newRunner(cfg, *pass, *keyPath, *dryRun, *yes)
 	runner.UpdateDir = *updateDir
@@ -288,6 +337,9 @@ func cmdRollback(args []string) error {
 
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
+		return err
+	}
+	if err := gateValidation(cfg, *yes); err != nil {
 		return err
 	}
 	runner := newRunner(cfg, *pass, *keyPath, *dryRun, *yes)

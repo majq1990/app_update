@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 )
 
@@ -38,6 +39,10 @@ func (c *Config) Validate() []Issue {
 	// ---- 全局设置 ----
 	if strings.TrimSpace(c.AnsibleUser) == "" {
 		issues = append(issues, Issue{"error", "全局设置", "ansible_user 未填写"})
+	} else if _, err := strconv.Atoi(strings.TrimSpace(c.AnsibleUser)); err == nil {
+		// 防御列错位：曾因 Excel 导出行号 off-by-one 导致 ansible_user 变成端口值 "22"
+		issues = append(issues, Issue{"error", "全局设置",
+			fmt.Sprintf("ansible_user 是纯数字 %q，疑似配置列错位（应为用户名如 root）", c.AnsibleUser)})
 	}
 	if c.AnsibleSSHPort < 1 || c.AnsibleSSHPort > 65535 {
 		issues = append(issues, Issue{"error", "全局设置",
@@ -72,6 +77,8 @@ func (c *Config) Validate() []Issue {
 		if len(app.Master) == 0 {
 			issues = append(issues, Issue{"error", w, "没有配置任何 master 群组主机"})
 		}
+		// 主机重复检测（同一 IP:端口 出现在多个群组 = 会重复更新/回滚）
+		hostSeen := map[string]string{}
 		for _, g := range []struct {
 			name  string
 			hosts []Host
@@ -80,6 +87,58 @@ func (c *Config) Validate() []Issue {
 		} {
 			for j, h := range g.hosts {
 				issues = append(issues, validateHost(w+"#"+g.name, fmt.Sprintf("第%d台", j+1), h, g.name)...)
+				if h.Host != "" {
+					key := fmt.Sprintf("%s:%d", h.Host, h.ServicePort)
+					if prev, dup := hostSeen[key]; dup {
+						issues = append(issues, Issue{"error", w,
+							fmt.Sprintf("主机重复：%s 同时出现在 %s 与 %s 群组", key, prev, g.name)})
+					} else {
+						hostSeen[key] = g.name
+					}
+				}
+			}
+		}
+		// master 群组多台主机时服务端口应一致（同一套应用对外端口相同）
+		if len(app.Master) > 1 {
+			base := app.Master[0].ServicePort
+			for _, h := range app.Master[1:] {
+				if base > 0 && h.ServicePort > 0 && h.ServicePort != base {
+					issues = append(issues, Issue{"warn", w,
+						fmt.Sprintf("master 群组服务端口不一致（首台 %d，%s 为 %d），请确认是否预期",
+							base, h.Host, h.ServicePort)})
+					break
+				}
+			}
+		}
+		// log_dir：必须相对路径，且不得与保留配置冲突
+		if ld := strings.TrimSpace(app.LogDir); ld != "" {
+			if strings.HasPrefix(ld, "/") {
+				issues = append(issues, Issue{"error", w,
+					fmt.Sprintf("log_dir 应为相对路径: %q", ld)})
+			}
+			for _, rf := range app.RetainedConfigFile {
+				if strings.Trim(strings.TrimSpace(rf), "/") == strings.Trim(ld, "/") {
+					issues = append(issues, Issue{"error", w,
+						fmt.Sprintf("log_dir 与 retained_config_file 冲突: %q", ld)})
+				}
+			}
+		}
+		// exclude_paths 格式
+		for _, ep := range app.ExcludePaths {
+			if strings.TrimSpace(ep) == "" {
+				issues = append(issues, Issue{"error", w, "exclude_paths 含空项"})
+			} else if strings.HasPrefix(ep, "/") {
+				issues = append(issues, Issue{"warn", w,
+					fmt.Sprintf("exclude_paths 建议用相对路径: %q", ep)})
+			}
+		}
+		// 保留配置与 master 专属文件交集（语义冲突）
+		for _, rf := range app.RetainedConfigFile {
+			for _, ex := range app.MasterExclusiveFiles {
+				if rf == ex {
+					issues = append(issues, Issue{"warn", w,
+						fmt.Sprintf("%q 同时在 retained_config_file 与 master_exclusive_files 中，请确认语义", rf)})
+				}
 			}
 		}
 	}

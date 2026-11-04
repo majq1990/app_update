@@ -99,18 +99,52 @@ func ConvertV1(conf map[string]string) (*config.Config, []config.Issue, error) {
 		}
 	}
 
-	// 未识别的 IP_WEB_* 键提示（保守：不猜测语义）
-	known := map[string]bool{"MIS": true, "GIS": true, "MF": true, "UMA": true, "REDIS": true}
+	// 未识别的 IP_WEB_* 键提示。
+	// 已认知的基础设施角色（非应用服务器）语义化说明；真正未知的才提示"未在映射表"。
+	appKeys := map[string]bool{"MIS": true, "GIS": true, "MF": true, "UMA": true}
+	infraKeys := map[string]string{
+		"REDIS":  "Redis 服务器",
+		"MEDIA":  "多媒体/文件服务器",
+		"JOB":    "Zookeeper/定时任务服务器",
+		"GATHER": "采集服务器",
+		"SG":     "社会治理应用（v1 映射表未收录）",
+	}
+	var infraSeen []string
 	for k := range conf {
 		if rest, ok := trimNumberedPrefix(k, "IP_WEB_"); ok {
 			suffix := strings.TrimRight(rest, "0123456789")
-			if suffix != "" && !known[suffix] {
-				notes = append(notes, config.Issue{Severity: "warn", Where: "转换器(v1)",
-					Msg: fmt.Sprintf("IP_WEB_%s 未在映射表中（已知：%v），已跳过", suffix, knownKeys())})
+			if suffix == "" || appKeys[suffix] {
+				continue
 			}
+			if _, ok := infraKeys[suffix]; ok {
+				if !containsStr(infraSeen, suffix) {
+					infraSeen = append(infraSeen, suffix)
+				}
+				continue
+			}
+			notes = append(notes, config.Issue{Severity: "warn", Where: "转换器(v1)",
+				Msg: fmt.Sprintf("IP_WEB_%s 未在映射表中（已知应用：%v），已跳过", suffix, knownKeys())})
 		}
 	}
+	if len(infraSeen) > 0 {
+		sort.Strings(infraSeen)
+		var parts []string
+		for _, s := range infraSeen {
+			parts = append(parts, fmt.Sprintf("IP_WEB_%s(%s)", s, infraKeys[s]))
+		}
+		notes = append(notes, config.Issue{Severity: "warn", Where: "转换器(v1)",
+			Msg: "以下为基础设施服务器角色（非受管应用，已跳过）：" + strings.Join(parts, "、")})
+	}
 	return cfg, notes, nil
+}
+
+func containsStr(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
 
 func v1Host(suffix, app, ip, remark string) config.Host {

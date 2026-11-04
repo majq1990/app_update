@@ -70,9 +70,12 @@ type App struct {
 	LogDir               string   `yaml:"log_dir,omitempty"`
 	RetainedConfigFile   []string `yaml:"retained_config_file,omitempty"`
 	MasterExclusiveFiles []string `yaml:"master_exclusive_files,omitempty"`
-	Master               []Host   `yaml:"master"`
-	Update               []Host   `yaml:"update"`
-	StaticPageGroup      []Host   `yaml:"static_page_group,omitempty"`
+	// ExcludePaths 排除路径（相对部署路径）：备份与同步都跳过，且不参与 --delete 清理。
+	// 用于体积巨大且无需随包更新的目录（如 eUrbanGIS 的 tilemap/ 切片缓存）。
+	ExcludePaths    []string `yaml:"exclude_paths,omitempty"`
+	Master          []Host   `yaml:"master"`
+	Update          []Host   `yaml:"update"`
+	StaticPageGroup []Host   `yaml:"static_page_group,omitempty"`
 }
 
 // Config 顶层配置。

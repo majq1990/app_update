@@ -1,6 +1,8 @@
 package appflow
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"fmt"
 	"net"
 	"os"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"github.com/majq1990/app-updater-go/internal/config"
+	"github.com/majq1990/app-updater-go/internal/maintain"
 	"github.com/majq1990/app-updater-go/internal/syncx"
 )
 
@@ -683,5 +686,195 @@ func TestDefaultHealthModeIsRemote(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("默认模式应在目标机本地探测: %v", *cmds)
+	}
+}
+
+// tomcat 日志目录：单复数（WEB-INF/log 与 WEB-INF/logs）都要排除。
+func TestLogDirPatternsTomcatBothForms(t *testing.T) {
+	app := &config.App{MiddleType: "tomcat", LogDir: "WEB-INF/logs"}
+	pats := logDirPatterns(app)
+	got := map[string]bool{}
+	for _, p := range pats {
+		got[p] = true
+	}
+	if !got["WEB-INF/log/"] || !got["WEB-INF/logs/"] {
+		t.Fatalf("tomcat 应同时排除单复数日志目录: %v", pats)
+	}
+	// jar 只排除自身 log_dir
+	jarPats := logDirPatterns(&config.App{MiddleType: "jar", LogDir: "logs"})
+	if len(jarPats) != 1 || jarPats[0] != "logs/" {
+		t.Fatalf("jar 应只排除 logs/: %v", jarPats)
+	}
+}
+
+// exclude_paths：备份与同步都跳过，且回滚 --delete 不清理它。
+func TestExcludePathsHonored(t *testing.T) {
+	root := t.TempDir()
+	cfg := testConfig()
+	cfg.Webs[0].ExcludePaths = []string{"tilemap/"}
+	r, _ := newTestRunner(t, cfg, root)
+
+	// 现场：tilemap 有大量缓存 + 一个会被更新的文件
+	webPath := filepath.Join(root, "webapps", "master")
+	mustWrite(t, filepath.Join(webPath, "tilemap", "deep", "L01.bin"), "cache")
+	mustWrite(t, filepath.Join(webPath, "WEB-INF", "web.xml"), "v1")
+
+	upd := filepath.Join(root, "update", "eUrbanMIS")
+	mustWrite(t, filepath.Join(upd, "WEB-INF", "web.xml"), "v2-new")
+	mustWrite(t, filepath.Join(upd, "tilemap", "new.bin"), "should-not-upload")
+
+	if _, err := r.Update("eUrbanMIS", []string{"master"}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	// 1) tilemap 不该被上传
+	files := readFileMap(t, webPath)
+	if _, ok := files["tilemap/new.bin"]; ok {
+		t.Fatalf("exclude_paths 应阻止上传 tilemap 内容")
+	}
+	if files["WEB-INF/web.xml"] != "v2-new" {
+		t.Fatalf("正常文件应更新")
+	}
+
+	// 2) 备份里不该包含 tilemap
+	backupRoot := filepath.Join(root, "backups", "eUrbanMIS")
+	var found bool
+	_ = filepath.WalkDir(backupRoot, func(p string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && strings.Contains(filepath.ToSlash(p), "tilemap/") {
+			found = true
+		}
+		return nil
+	})
+	if found {
+		t.Fatalf("exclude_paths 应阻止备份 tilemap")
+	}
+
+	// 3) 回滚 --delete 不该删掉现场 tilemap
+	if _, err := r.Rollback("eUrbanMIS", "", []string{"master"}); err != nil {
+		t.Fatalf("rollback: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(webPath, "tilemap", "deep", "L01.bin")); err != nil {
+		t.Fatalf("回滚 --delete 不应删除 exclude_paths（tilemap）")
+	}
+}
+
+// 压缩包备份回滚：ListVersions 识别 .tar.gz，Rollback 解压后还原。
+func TestRollbackFromCompressedBackup(t *testing.T) {
+	root := t.TempDir()
+	cfg := testConfig()
+	r, _ := newTestRunner(t, cfg, root)
+	webPath := filepath.Join(root, "webapps", "master")
+
+	// 造一份未压缩备份，再用 maintain 压缩它（模拟 compress-backups 之后的现场）
+	bkDir := filepath.Join(root, "backups", "eUrbanMIS", "2026110112", "10.0.0.1", "eUrbanMIS")
+	mustWrite(t, filepath.Join(bkDir, "app.jar"), "v-old-BACKUP-1")
+	mustWrite(t, filepath.Join(bkDir, "WEB-INF", "web.xml"), "old-war-BACKUP")
+
+	if _, err := maintain.CompressBackups(filepath.Join(root, "backups"), 2, false); err != nil {
+		t.Fatalf("compress: %v", err)
+	}
+	// 原目录应已删除，只剩 tar.gz
+	if _, err := os.Stat(filepath.Join(root, "backups", "eUrbanMIS", "2026110112")); !os.IsNotExist(err) {
+		t.Fatalf("压缩后原目录应删除")
+	}
+
+	// ListVersions 应能列出压缩版本
+	vs, err := ListVersions(filepath.Join(root, "backups"), "eUrbanMIS")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(vs) != 1 || vs[0] != "2026110112" {
+		t.Fatalf("应识别压缩包版本: %v", vs)
+	}
+
+	// 现场改为新版本，然后从压缩包回滚
+	mustWrite(t, filepath.Join(webPath, "app.jar"), "v-new-CURRENT-2-LONGER")
+	mustWrite(t, filepath.Join(webPath, "WEB-INF", "web.xml"), "new-war-CURRENT-LONGER")
+
+	sum, err := r.Rollback("eUrbanMIS", "2026110112", []string{GroupMaster})
+	if err != nil {
+		t.Fatalf("rollback: %v", err)
+	}
+	if sum.FailCount() != 0 {
+		t.Fatalf("压缩包回滚应成功: %+v", sum.Results)
+	}
+	files := readFileMap(t, webPath)
+	if files["app.jar"] != "v-old-BACKUP-1" {
+		t.Fatalf("压缩包回滚未还原 app.jar: %s", files["app.jar"])
+	}
+	if files["WEB-INF/web.xml"] != "old-war-BACKUP" {
+		t.Fatalf("压缩包回滚未还原 web.xml: %s", files["WEB-INF/web.xml"])
+	}
+}
+
+// 恶意/损坏压缩包的路径穿越防护。
+func TestExtractTarGzRejectsTraversal(t *testing.T) {
+	dir := t.TempDir()
+	archive := filepath.Join(dir, "bad.tar.gz")
+	f, err := os.Create(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	// 构造 ../escape.txt
+	hdr := &tar.Header{Name: "../escape.txt", Mode: 0o644, Size: 5, Typeflag: tar.TypeReg}
+	if err := tw.WriteHeader(hdr); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write([]byte("evil!")); err != nil {
+		t.Fatal(err)
+	}
+	_ = tw.Close()
+	_ = gz.Close()
+	_ = f.Close()
+
+	dst := filepath.Join(dir, "out")
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := ExtractTarGz(archive, dst); err == nil {
+		t.Fatalf("路径穿越应被拒绝")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "escape.txt")); !os.IsNotExist(err) {
+		t.Fatalf("不应写出目录外文件")
+	}
+}
+
+// 回滚必须保护保留配置（.env 等）：备份不含时也不能被 --delete 删掉。
+// 2026-11-04 实机踩坑：export 回滚后 export.env 被删，服务起不来。
+func TestRollbackKeepsRetainedConfig(t *testing.T) {
+	root := t.TempDir()
+	cfg := testConfig()
+	cfg.Webs[0].MiddleType = "jar"
+	cfg.Webs[0].RetainedConfigFile = []string{"app.env", "application.properties"}
+	cfg.Webs[0].Master[0].CheckURI = ""
+	cfg.Webs[0].Master[0].StartCmd = "systemctl start app"
+	cfg.Webs[0].Master[0].StopCmd = "systemctl stop app"
+	cfg.Webs[0].Master[0].HealthMode = "remote"
+	cfg.Webs[0].Update = nil
+	r, _ := newTestRunner(t, cfg, root)
+
+	webPath := filepath.Join(root, "webapps", "master")
+	// 备份：只含 jar（**不含** .env，模拟 role 生成的现场文件）
+	bkDir := filepath.Join(root, "backups", "eUrbanMIS", "2026110112", "10.0.0.1", "eUrbanMIS")
+	mustWrite(t, filepath.Join(bkDir, "app.jar"), "old-jar-VERSION-1")
+	// 现场：jar 新版本 + 运行中的 .env 与 application.properties
+	mustWrite(t, filepath.Join(webPath, "app.jar"), "new-jar-VERSION-2-LONGER")
+	mustWrite(t, filepath.Join(webPath, "app.env"), "RUNTIME_ENV")
+	mustWrite(t, filepath.Join(webPath, "application.properties"), "runtime-prop")
+
+	if _, err := r.Rollback("eUrbanMIS", "2026110112", []string{GroupMaster}); err != nil {
+		t.Fatalf("rollback: %v", err)
+	}
+	files := readFileMap(t, webPath)
+	if files["app.jar"] != "old-jar-VERSION-1" {
+		t.Fatalf("jar 应被还原: %s", files["app.jar"])
+	}
+	if files["app.env"] != "RUNTIME_ENV" {
+		t.Fatalf("保留配置 app.env 不应被回滚删除（实测踩坑场景）")
+	}
+	if files["application.properties"] != "runtime-prop" {
+		t.Fatalf("保留配置 application.properties 不应被删除")
 	}
 }

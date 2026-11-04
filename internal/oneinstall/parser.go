@@ -291,7 +291,11 @@ func Convert(inv Inventory, opts Options) (*config.Config, []config.Issue, error
 				}
 				checkURI := ""
 				if sec.middle == "tomcat" {
-					checkURI = "/" + appKey + "/main.htm"
+					// WAR 健康检查：按应用上下文根判断。
+					// 实测（2026-11-04 node2）：/eUrbanGIS/main.htm 返回 404，
+					// 而 /eUrbanGIS/ 与 /eUrbanGIS/symbol/default.png 返回 200。
+					// main.htm 并非所有 WAR 都有，用上下文根更可靠。
+					checkURI = "/" + appKey + "/"
 				} else {
 					// 一键部署标准健康检查地址（核心 Java 服务自带 backend 探针）；
 					// 清单外服务留空 → 更新后按 service_port 做 TCP 端口探测。
@@ -406,7 +410,14 @@ func Convert(inv Inventory, opts Options) (*config.Config, []config.Issue, error
 
 			logDir := "logs/" // JAR 微服务日志目录约定
 			if sec.middle == "tomcat" {
-				logDir = "WEB-INF/logs" // WAR 应用日志目录约定（个别应用为 WEB-INF/log，初稿需人工核对）
+				logDir = "WEB-INF/logs" // WAR 日志约定；日志排除同时覆盖 WEB-INF/log/ 与 WEB-INF/logs/
+			}
+
+			// 应用级排除路径（备份+同步都跳过，且不参与 --delete 清理）
+			var excludePaths []string
+			if sec.middle == "tomcat" && appKey == "eUrbanGIS" {
+				// GIS 切片缓存体积巨大（现场常用数 GB），不随包更新、无需备份
+				excludePaths = []string{"tilemap/"}
 			}
 
 			cfg.Webs = append(cfg.Webs, config.App{
@@ -415,6 +426,7 @@ func Convert(inv Inventory, opts Options) (*config.Config, []config.Issue, error
 				LogDir:               logDir,
 				RetainedConfigFile:   retained,
 				MasterExclusiveFiles: exclusive,
+				ExcludePaths:         excludePaths,
 				Master:               masters,
 				Update:               updates,
 			})

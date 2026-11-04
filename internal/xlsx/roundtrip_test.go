@@ -2,6 +2,7 @@ package xlsx
 
 import (
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/xuri/excelize/v2"
@@ -56,6 +57,7 @@ func TestExportImportRoundTrip(t *testing.T) {
 			Web: "eUrbanGIS", MiddleType: "tomcat", LogDir: "WEB-INF/logs",
 			RetainedConfigFile:   []string{"WEB-INF/classes/jdbc.properties"},
 			MasterExclusiveFiles: []string{"egova-liquibase-*.jar"},
+			ExcludePaths:         []string{"tilemap/"},
 			Master: []config.Host{{
 				Host: "10.2.0.172", ServicePort: 8085,
 				CheckURI: "/eUrbanGIS/symbol/default.png", WebPath: "/egova/web/eUrbanGIS",
@@ -94,6 +96,10 @@ func TestExportImportRoundTrip(t *testing.T) {
 	if a.Update[0].SSHPort != 22022 || a.Update[0].SSHUser != "deploy" {
 		t.Fatalf("按主机覆盖 SSH 失效: %+v", a.Update[0])
 	}
+	// 排除路径必须走完 Excel 链路（曾漏实现，导致 tilemap 被备份传输）
+	if len(a.ExcludePaths) != 1 || a.ExcludePaths[0] != "tilemap/" {
+		t.Fatalf("exclude_paths 回环失败: %v", a.ExcludePaths)
+	}
 	if a.Master[0].ServicePort != 8085 || a.Master[0].CheckURI != "/eUrbanGIS/symbol/default.png" {
 		t.Fatalf("master 字段不符: %+v", a.Master[0])
 	}
@@ -103,6 +109,30 @@ func TestExportImportRoundTrip(t *testing.T) {
 	// 校验应通过
 	if iss := cfg.Validate(); config.HasError(iss) {
 		t.Fatalf("回环配置应通过校验: %+v", iss)
+	}
+
+	// 全局设置必须原样回环（2026-11-04 实测踩坑：export 写全局值行号 off-by-one，
+	// 导致 ansible_user 变成端口值 "22"，整份配置 SSH 全部认证失败）
+	if cfg.AnsibleUser != want.AnsibleUser {
+		t.Fatalf("全局 ansible_user 回环错误: got %q want %q", cfg.AnsibleUser, want.AnsibleUser)
+	}
+	if cfg.AnsibleSSHPort != want.AnsibleSSHPort {
+		t.Fatalf("全局 ansible_ssh_port 回环错误: got %d want %d", cfg.AnsibleSSHPort, want.AnsibleSSHPort)
+	}
+	if cfg.AnsibleSSHPass != want.AnsibleSSHPass {
+		t.Fatalf("全局 ansible_ssh_pass 回环错误: got %q want %q", cfg.AnsibleSSHPass, want.AnsibleSSHPass)
+	}
+	if len(cfg.GlobalExcludeLogs) != len(want.GlobalExcludeLogs) {
+		t.Fatalf("全局 global_exclude_logs 回环错误: got %v", cfg.GlobalExcludeLogs)
+	}
+	for i := range want.GlobalExcludeLogs {
+		if cfg.GlobalExcludeLogs[i] != want.GlobalExcludeLogs[i] {
+			t.Fatalf("global_exclude_logs[%d] 错误: got %v", i, cfg.GlobalExcludeLogs)
+		}
+	}
+	// 防御：用户名不能是纯数字（曾因列错位变成 "22"）
+	if _, err := strconv.Atoi(cfg.AnsibleUser); err == nil {
+		t.Fatalf("ansible_user 不应是纯数字，疑似列错位: %q", cfg.AnsibleUser)
 	}
 }
 

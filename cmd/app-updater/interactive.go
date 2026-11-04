@@ -12,11 +12,14 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/majq1990/app-updater-go/internal/appflow"
 	"github.com/majq1990/app-updater-go/internal/config"
+	"github.com/majq1990/app-updater-go/internal/maintain"
 	"github.com/majq1990/app-updater-go/internal/xlsx"
 )
 
@@ -160,12 +163,16 @@ func menuUpdate() {
 		if app.MiddleType == "tomcat" {
 			fmt.Println("4. 静态页面部分更新")
 			fmt.Println("5. 静态页面全量更新")
+			fmt.Println("6. 清理历史更新包（update/）")
+			fmt.Println("7. 压缩未压缩的备份包（多线程）")
 			fmt.Println("0. 返回")
 		} else {
 			fmt.Println("4. 静态页面更新 (JAR)")
+			fmt.Println("6. 清理历史更新包（update/）")
+			fmt.Println("7. 压缩未压缩的备份包（多线程）")
 			fmt.Println("0. 返回")
 		}
-		c := getIntChoice("请选择", 0, 5)
+		c := getIntChoice("请选择", 0, 7)
 		switch {
 		case c == 0:
 			return
@@ -195,6 +202,10 @@ func menuUpdate() {
 				continue
 			}
 			runStatic(cfg, app.Web, "jar", "", src, pass)
+		case c == 6:
+			maintainCleanUpdate()
+		case c == 7:
+			maintainCompressBackups()
 		}
 	}
 }
@@ -385,6 +396,82 @@ func menuConfig() {
 	}
 }
 
+// maintainCleanUpdate 清理 update/ 下的历史更新包（先统计再确认）。
+func maintainCleanUpdate() {
+	updateDir := getInput("更新包目录", "update")
+	res, err := maintain.CleanUpdatePackages(updateDir, true)
+	if err != nil {
+		fmt.Println("❌", err)
+		return
+	}
+	if len(res.RemovedApps) == 0 {
+		fmt.Printf("ℹ️ %s 下没有可清理的应用包目录\n", updateDir)
+		return
+	}
+	fmt.Printf("\n将清理 %s 下 %d 个应用包目录（共 %d 个文件，%s）：\n",
+		updateDir, len(res.RemovedApps), res.RemovedFiles, maintain.HumanBytes(res.FreedBytes))
+	for _, a := range res.RemovedApps {
+		fmt.Println("  -", a+"/")
+	}
+	if !confirm("\n确认删除以上更新包?（不可恢复）", false) {
+		fmt.Println("已取消。")
+		return
+	}
+	if _, err := maintain.CleanUpdatePackages(updateDir, false); err != nil {
+		fmt.Println("❌", err)
+		return
+	}
+	fmt.Printf("✅ 已清理，释放 %s\n", maintain.HumanBytes(res.FreedBytes))
+}
+
+// maintainCompressBackups 对未压缩的备份版本目录做多线程压缩。
+func maintainCompressBackups() {
+	backupDir := getInput("备份目录", "backups")
+
+	// 先预览
+	pre, err := maintain.CompressBackups(backupDir, 0, true)
+	if err != nil {
+		fmt.Println("❌", err)
+		return
+	}
+	if len(pre.Archives) == 0 {
+		fmt.Printf("ℹ️ %s 下没有需要压缩的备份版本目录\n", backupDir)
+		for _, s := range pre.Skipped {
+			fmt.Println("  跳过:", s)
+		}
+		return
+	}
+	fmt.Printf("\n待压缩 %d 个版本目录，原始体积约 %s\n", len(pre.Archives), maintain.HumanBytes(pre.Bytes))
+	for _, s := range pre.Skipped {
+		fmt.Println("  跳过:", s)
+	}
+	workers := runtime.NumCPU()
+	if workers > 8 {
+		workers = 8
+	}
+	fmt.Printf("\n将使用 %d 线程压缩（每版本一个 tar.gz，压缩成功后删除原目录）\n", workers)
+	if !confirm("确认开始压缩?", false) {
+		fmt.Println("已取消。")
+		return
+	}
+
+	fmt.Println("\n压缩中，请稍候...")
+	res, err := maintain.CompressBackups(backupDir, workers, false)
+	if err != nil {
+		fmt.Println("❌", err)
+	}
+	fmt.Printf("\n✅ 压缩完成：%d 个版本，%s → %s（耗时 %s）\n",
+		len(res.Archives), maintain.HumanBytes(res.Bytes), maintain.HumanBytes(res.Packed),
+		res.Elapsed.Round(time.Second))
+	if maintain.HumanBytes(res.Bytes) != "" && res.Bytes > 0 {
+		ratio := float64(res.Packed) / float64(res.Bytes) * 100
+		fmt.Printf("   压缩率 %.1f%%\n", ratio)
+	}
+	for _, a := range res.Archives {
+		fmt.Println("  ", a)
+	}
+}
+
 // pickHost 选应用→群组→主机，返回可修改的 Host 指针。
 func pickHost(app *config.App) (*config.Host, string) {
 	fmt.Println("1. master  2. update  3. static")
@@ -540,11 +627,28 @@ func loadCurOrEmpty() (*config.Config, error) {
 	return nil, fmt.Errorf("未加载配置")
 }
 
-// finishEdit 人工编辑后的统一收口：校验 → 确认 → 落盘当前配置。
+// printValidation 展示校验结果并返回统计（错误数/警告数）。
+func printValidation(issues []config.Issue) (errs, warns int) {
+	for _, is := range issues {
+		if is.Severity == "error" {
+			errs++
+		} else {
+			warns++
+		}
+	}
+	if len(issues) > 0 {
+		fmt.Printf("\n---- 配置校验：%d 个错误 / %d 个警告 ----\n", errs, warns)
+		printIssues(issues)
+	}
+	return errs, warns
+}
+
+// finishEdit 人工编辑后的统一收口：完整校验 → 确认 → 落盘当前配置。
+// 表格导入、人工增删改应用/主机、识别一键，全部走这一条路径，保证任何配置变更都过一轮有效性验证。
 func finishEdit(cfg *config.Config, what string) {
 	issues := cfg.Validate()
-	printIssues(issues)
-	if config.HasError(issues) && !confirm("配置存在错误级问题，仍要保存?", false) {
+	errs, warns := printValidation(issues)
+	if errs > 0 && !confirm(fmt.Sprintf("配置存在 %d 个错误级问题，仍要保存?", errs), false) {
 		fmt.Println("已放弃保存（可用表格导入或重新编辑修正）")
 		return
 	}
@@ -552,7 +656,16 @@ func finishEdit(cfg *config.Config, what string) {
 		fmt.Println("❌", err)
 		return
 	}
-	fmt.Printf("✅ 已保存%s → %s（%d 个应用）；需要表格用「导出当前配置 → 表格」\n", what, curCfgPath, len(cfg.Webs))
+	status := "✅ 校验通过"
+	if errs > 0 {
+		status = fmt.Sprintf("⚠️ 已保存但含 %d 个错误", errs)
+	} else if warns > 0 {
+		status = fmt.Sprintf("✅ 校验通过（%d 个警告）", warns)
+	}
+	fmt.Printf("%s：已保存%s → %s（%d 个应用）\n", status, what, curCfgPath, len(cfg.Webs))
+	if errs == 0 && warns == 0 {
+		fmt.Println("   配置完全有效，可直接执行 update/rollback")
+	}
 }
 
 // askHost 交互录入一台主机。
@@ -814,12 +927,31 @@ func configFromOneinstall() {
 	fmt.Printf("识别到 %d 个应用\n", len(cfg.Webs))
 	printIssues(notes)
 
+	// 识别后立即做配置校验：有 error 就当场摆出来，避免"看起来成功、实际不能用"
+	valIssues := cfg.Validate()
+	if len(valIssues) > 0 {
+		fmt.Println("\n---- 配置校验 ----")
+		printIssues(valIssues)
+	}
+	if config.HasError(valIssues) {
+		fmt.Println("\n❌ 识别出的配置存在错误级问题（常见：v1 部署缺端口，需人工补填）。")
+		fmt.Println("   可先保存，然后用「10. 修改主机配置」逐台补端口/健康检查，或「4. 导出当前配置 → 表格」改完再导入。")
+		if !confirm("仍要保存这份带错误的配置?", false) {
+			fmt.Println("已放弃保存（当前配置未改变）。")
+			return
+		}
+	}
+
 	dst := getInput("保存配置到 YAML", curCfgPath)
 	if err := saveCurConfig(cfg, dst); err != nil {
 		fmt.Println("❌", err)
 		return
 	}
-	fmt.Printf("✅ 已载入当前配置: %s（%d 个应用）；需要表格用「导出当前配置 → 表格」\n", curCfgPath, len(cfg.Webs))
+	if config.HasError(valIssues) {
+		fmt.Printf("⚠️ 已保存 %s（%d 个应用）—— 存在错误，补齐后才能执行 update\n", curCfgPath, len(cfg.Webs))
+	} else {
+		fmt.Printf("✅ 已载入当前配置: %s（%d 个应用）；需要表格用「导出当前配置 → 表格」\n", curCfgPath, len(cfg.Webs))
+	}
 }
 
 // configFromXlsx 表格导入 → 载入当前配置（校验不过不落地）。

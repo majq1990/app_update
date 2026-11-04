@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -40,7 +41,20 @@ func (c *Config) Normalize() {
 	// 可设 health_mode: none 或自行确认——标准表外的应用不受影响）。
 	for i := range c.Webs {
 		app := &c.Webs[i]
-		if app.MiddleType != "jar" {
+		if app.MiddleType == "tomcat" {
+			// WAR 健康检查兼容修正：早期转换器生成 /<应用>/main.htm，
+			// 实测多数 WAR 没有 main.htm（返回 404），改为上下文根 /<应用>/。
+			fix := func(h *Host) {
+				if strings.HasSuffix(h.CheckURI, "/main.htm") && h.ServicePort > 0 {
+					h.CheckURI = strings.TrimSuffix(h.CheckURI, "main.htm")
+				}
+			}
+			for j := range app.Master {
+				fix(&app.Master[j])
+			}
+			for j := range app.Update {
+				fix(&app.Update[j])
+			}
 			continue
 		}
 		uri, ok := StandardCheckURI[app.Web]

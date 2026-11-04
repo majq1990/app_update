@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/xuri/excelize/v2"
 
@@ -46,14 +47,30 @@ const usage = `app-updater — Java 应用更新工具 (Go 版)
       [--dry-run] [--yes]                       不带 --yes 一律只出计划不执行
   app-updater rollback -c config.yaml --app 名称 [--version 备份版本]
       [--groups master,update,static] [--list] [--dry-run] [--yes]
+  app-updater clean-update [--dir update] [--dry-run] [--yes]
+      清理 update/ 下的历史更新包（交互菜单：配置管理 11）
+  app-updater compress-backups [--dir backups] [--workers N] [--dry-run] [--yes]
+      对未压缩的备份版本目录做多线程 tar.gz 压缩（交互菜单：配置管理 12）
+  app-updater version                          查看版本
 `
 
 func main() {
+	// 首次运行构建完整工作目录（update/backups/logs，幂等）。
+	// 仅交互模式与执行类命令需要；纯查询类（version/help/compress 自定义目录）不打扰。
 	if len(os.Args) < 2 {
+		if created := ensureWorkspace(); len(created) > 0 {
+			fmt.Printf("已初始化工作目录: %s\n", strings.Join(created, "/ "))
+		}
 		runInteractive() // 无参数 = 交互模式（菜单式，对齐旧版操作习惯）
 		return
 	}
 	var err error
+	switch os.Args[1] {
+	case "update", "rollback", "setup-ssh", "clean-update", "compress-backups":
+		if created := ensureWorkspace(); len(created) > 0 {
+			fmt.Printf("已初始化工作目录: %s\n", strings.Join(created, "/ "))
+		}
+	}
 	switch os.Args[1] {
 	case "template":
 		err = cmdTemplate(os.Args[2:])
@@ -71,6 +88,10 @@ func main() {
 		err = cmdUpdate(os.Args[2:])
 	case "rollback":
 		err = cmdRollback(os.Args[2:])
+	case "clean-update":
+		err = cmdCleanUpdate(os.Args[2:])
+	case "compress-backups":
+		err = cmdCompressBackups(os.Args[2:])
 	case "version", "-v", "--version":
 		fmt.Println(versionString())
 	case "help", "-h", "--help":

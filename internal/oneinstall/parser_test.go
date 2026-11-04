@@ -128,8 +128,8 @@ ip_web_a:
     - type: microservice
       sub_type: jarApp
   hosts:
-    master: n1
-    slave: n2
+    master: n2
+    slave: n1
 ip_web_b:
   name: B
   modules:
@@ -147,7 +147,6 @@ ip_web_c:
     master: n2
     slave:
       - n1
-      - n2
 ip_web_jardup:
   name: D
   modules:
@@ -244,24 +243,30 @@ func TestConvertSyntheticFilterAndMapping(t *testing.T) {
 	if jar == nil {
 		t.Fatalf("jarApp 缺失")
 	}
-	// 旧版标量 slave 写法
-	if len(jar.Update) != 1 || jar.Update[0].Host != "10.0.0.2" {
+	// 旧版标量 slave 写法（master=n2/10.0.0.2，slave=n1/10.0.0.1）
+	if len(jar.Update) != 1 || jar.Update[0].Host != "10.0.0.1" {
 		t.Fatalf("slave→update 映射错误: %+v", jar.Update)
 	}
-	if jar.Update[0].SSHPort != 2222 {
+	if jar.Update[0].SSHPort != 22 {
 		t.Fatalf("slave SSH 端口错误: %d", jar.Update[0].SSHPort)
+	}
+	if len(jar.Master) != 1 || jar.Master[0].Host != "10.0.0.2" {
+		t.Fatalf("jarApp master 错误: %+v", jar.Master)
 	}
 	if !strings.HasPrefix(jar.Master[0].StartCmd, "systemctl start jarApp") {
 		t.Fatalf("unit 命名错误: %s", jar.Master[0].StartCmd)
 	}
 
-	// 新版列表 slave：多备节点逐台进入 update 群组
+	// 新版列表 slave：备节点逐台进入 update 群组
 	jm := def.AppByName("jarMulti")
 	if jm == nil {
 		t.Fatalf("jarMulti 缺失")
 	}
-	if len(jm.Update) != 2 || jm.Update[0].Host != "10.0.0.1" || jm.Update[1].Host != "10.0.0.2" {
-		t.Fatalf("多备节点映射错误: %+v", jm.Update)
+	if len(jm.Update) != 1 || jm.Update[0].Host != "10.0.0.1" {
+		t.Fatalf("备节点映射错误: %+v", jm.Update)
+	}
+	if len(jm.Master) != 1 || jm.Master[0].Host != "10.0.0.2" {
+		t.Fatalf("jarMulti master 错误: %+v", jm.Master)
 	}
 	// 空列表 slave（新版写法）：不生成 update
 	nb := def.AppByName("warNoBiz")
@@ -336,8 +341,8 @@ func TestConvertRealInventoryStructure(t *testing.T) {
 	if gis.Master[0].StartCmd != "systemctl start tomcat-GIS" {
 		t.Fatalf("启动命令错误: %s", gis.Master[0].StartCmd)
 	}
-	if gis.Master[0].CheckURI != "/eUrbanGIS/main.htm" {
-		t.Fatalf("WAR check_uri 错误: %s", gis.Master[0].CheckURI)
+	if gis.Master[0].CheckURI != "/eUrbanGIS/" {
+		t.Fatalf("WAR check_uri 错误（应为上下文根）: %s", gis.Master[0].CheckURI)
 	}
 	// GIS 不在 MIS/UMA/MF/SG 扩展清单：只有 jdbc/redis 两个保留配置
 	if len(gis.RetainedConfigFile) != 2 ||
@@ -349,6 +354,14 @@ func TestConvertRealInventoryStructure(t *testing.T) {
 		gis.MasterExclusiveFiles[0] != "egova-liquibase-*.jar" ||
 		gis.MasterExclusiveFiles[1] != "liquibase-core-*.jar" {
 		t.Fatalf("WAR 应自动配置 liquibase 排除: %v", gis.MasterExclusiveFiles)
+	}
+	// eUrbanGIS 自动排除 tilemap（切片缓存体积巨大，不备份不更新）
+	if len(gis.ExcludePaths) != 1 || gis.ExcludePaths[0] != "tilemap/" {
+		t.Fatalf("eUrbanGIS 应自动排除 tilemap/: %v", gis.ExcludePaths)
+	}
+	// 其他 WAR 不应带 tilemap 排除
+	if uma := cfg.AppByName("eUrbanUMA"); uma != nil && len(uma.ExcludePaths) != 0 {
+		t.Fatalf("eUrbanUMA 不应有 exclude_paths: %v", uma.ExcludePaths)
 	}
 
 	ep := cfg.AppByName("eurbanpro")

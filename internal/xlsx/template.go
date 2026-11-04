@@ -38,7 +38,8 @@ var appColumns = []struct {
 	width float64
 }{
 	{"应用名称", 20}, {"中间件类型", 13}, {"应用日志目录(相对部署路径)", 26},
-	{"保留配置文件(相对部署路径)", 32}, {"Master专属排除文件", 26}, {"备注", 50},
+	{"保留配置文件(相对部署路径)", 32}, {"Master专属排除文件", 26},
+	{"排除路径(不备份不同步)", 26}, {"备注", 50},
 }
 
 var hostColumns = []struct {
@@ -195,6 +196,7 @@ func writeNotes(f *excelize.File) error {
 		"· 应用日志目录：相对部署路径，如 logs/，备份与更新时排除，不会被删。",
 		"· 保留配置文件：相对部署路径，多个用逗号分隔，如 gisserver.env,jvm/ —— JAR 应用更新保命项。",
 		"· Master专属排除文件：仅 tomcat 生效；不该随 WAR 更新的 jar（数据库驱动等），相对部署路径。",
+		"· 排除路径：不备份、不同步、也不被回滚 --delete 清理的目录（如 eUrbanGIS 的 tilemap/），相对部署路径。",
 		"· 群组：master（主节点）/ update（更新节点）/ static（静态页面 nginx 服务器）。",
 		"· SSH端口/SSH用户：留空则使用全局设置，可按主机覆盖。",
 		"· 部署路径：服务器上的绝对路径，tomcat 一般为 .../webapps/应用名，jar 为 jar 所在目录。",

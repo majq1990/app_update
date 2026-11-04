@@ -32,7 +32,9 @@ func BuildFromConfig(f *excelize.File, cfg *config.Config) error {
 	}
 	for i, g := range globalRows {
 		if v, ok := gvals[g.key]; ok {
-			f.SetCellValue(SheetGlobal, cellName(2, i+2), v)
+			// 数据从第 3 行开始（第 2 行是表头），与 writeLayout 的 r+3 一致。
+			// 之前写成 i+2 导致整体上移一行：键值错位（ansible_user 变成端口值等）。
+			f.SetCellValue(SheetGlobal, cellName(2, i+3), v)
 		}
 	}
 
@@ -42,6 +44,7 @@ func BuildFromConfig(f *excelize.File, cfg *config.Config) error {
 			app.Web, app.MiddleType, app.LogDir,
 			strings.Join(app.RetainedConfigFile, ","),
 			strings.Join(app.MasterExclusiveFiles, ","),
+			strings.Join(app.ExcludePaths, ","),
 			"",
 		}
 		for c, v := range vals {

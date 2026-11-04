@@ -78,6 +78,10 @@ func Import(path string) (*config.Config, []config.Issue, error) {
 		if len(row) > 4 {
 			app.MasterExclusiveFiles = splitList(row[4])
 		}
+		if len(row) > 5 {
+			// 排除路径（不备份不同步，也不参与 --delete 清理）
+			app.ExcludePaths = splitList(row[5])
+		}
 		if apps[name] {
 			issues = append(issues, config.Issue{Severity: "error", Where: where, Msg: "应用名称重复"})
 		}
