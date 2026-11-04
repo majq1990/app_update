@@ -1,0 +1,11 @@
+bin/
+.mimosa/
+*.exe
+
+# 构建产物：二进制不入库，仅保留发布清单与说明
+dist/*
+!dist/README-发布包.md
+/app-updater
+/app-updater-linux-*
+/app-updater-darwin-*
+*.tar.gz

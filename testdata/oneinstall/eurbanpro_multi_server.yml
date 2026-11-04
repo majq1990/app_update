@@ -1,0 +1,571 @@
+# 服务器配置
+ip_db_biz:
+  name: 业务数据库
+  sub_flag: 1
+  need_flag: 1
+  biz_flag: 0
+  tiny_flag: 1
+  choice_index: 1
+  deploy_status_flag: 0
+  modules:
+    - type: mysql
+      name: 业务库
+      sub_type: biz
+    - type: cetus
+      name: 业务库代理
+      sub_type: biz
+  hosts:
+    master: node3
+    slave:
+ip_db_stat:
+  name: 统计数据库
+  sub_flag: 1
+  need_flag: 1
+  biz_flag: 0
+  tiny_flag: 1
+  choice_index: 2
+  deploy_status_flag: 0
+  modules:
+    - type: mysql
+      name: 统计库
+      sub_type: stat
+    - type: cetus
+      name: 统计库代理
+      sub_type: stat
+  hosts:
+    master: node3
+    slave:
+ip_web_redis:
+  name: 业务REDIS服务器
+  sub_flag: 1
+  need_flag: 1
+  biz_flag: 0
+  tiny_flag: 1
+  choice_index: 3
+  deploy_status_flag: 0
+  modules:
+    - type: redis
+      name: redis内存数据库
+      sub_type: redis
+  hosts:
+    master: node3
+    slave:
+ip_web_nacos:
+  name: NACOS服务器
+  sub_flag: 0
+  need_flag: 1
+  biz_flag: 0
+  tiny_flag: 1
+  choice_index: 4
+  deploy_status_flag: 0
+  modules:
+    - type: nacos
+      name: nacos注册中心
+      sub_type: nacos
+  hosts:
+    master: node3
+    slave:
+ip_web_gis:
+  name: GIS服务器
+  sub_flag: 1
+  need_flag: 1
+  biz_flag: 0
+  tiny_flag: 1
+  choice_index: 5
+  deploy_status_flag: 0
+  modules:
+    - type: service
+      name: GIS应用
+      sub_type: eUrbanGIS
+  hosts:
+    master: node2
+    slave:
+ip_tool_postgis:
+  name: PG数据库服务器
+  sub_flag: 1
+  need_flag: 1
+  biz_flag: 0
+  tiny_flag: 1
+  choice_index: 6
+  deploy_status_flag: 0
+  modules:
+    - type: postgresql
+      name: PG数据库
+      sub_type: pg
+  hosts:
+    master: node3
+    slave:
+ip_db_tdengine:
+  name: TDengine服务器
+  sub_flag: 0
+  need_flag: 1
+  biz_flag: 0
+  tiny_flag: 1
+  choice_index: 7
+  deploy_status_flag: 0
+  modules:
+    - type: TDengine
+      name: 时序数据库
+      sub_type: TDengine
+  hosts:
+    master: node3
+    slave:
+ip_web_media:
+  name: 多媒体服务器
+  sub_flag: 0
+  need_flag: 1
+  biz_flag: 0
+  tiny_flag: 1
+  choice_index: 8
+  deploy_status_flag: 0
+  modules:
+    - type: microservice
+      name: http共享目录服务
+      sub_type: httpfileservice
+    - type: minio
+      name: minio
+      sub_type: minio
+  hosts:
+    master: node2
+    slave:
+ip_web_job:
+  name: ZOOKEEPER服务器
+  sub_flag: 0
+  need_flag: 1
+  biz_flag: 0
+  tiny_flag: 1
+  choice_index: 9
+  deploy_status_flag: 0
+  modules:
+    - type: zookeeper
+      name: zookeeper
+      sub_type: zookeeper
+  hosts:
+    master: node3
+    slave:
+ip_web_eurbanpro:
+  name: 麒舰核心应用服务器
+  sub_flag: 1
+  need_flag: 1
+  biz_flag: 1
+  tiny_flag: 1
+  choice_index: x1
+  deploy_status_flag: 0
+  modules:
+    - type: microservice
+      name: 核心平台
+      sub_type: eurbanpro
+    - type: microservice
+      name: 流程中心
+      sub_type: workflow
+  hosts:
+    master: node2
+    slave:
+ip_web_usercenter:
+  name: 用户中心服务器
+  sub_flag: 1
+  need_flag: 1
+  biz_flag: 0
+  tiny_flag: 1
+  choice_index: x2
+  deploy_status_flag: 0
+  modules:
+    - type: microservice
+      name: 用户中心2.0微服务
+      sub_type: usercenter
+  hosts:
+    master: node2
+    slave: []
+ip_web_linglong:
+  name: 灵珑服务器
+  sub_flag: 1
+  need_flag: 1
+  biz_flag: 0
+  tiny_flag: 1
+  choice_index: x3
+  deploy_status_flag: 0
+  modules:
+    - type: microservice
+      name: 灵珑微服务
+      sub_type: linglong
+  hosts:
+    master: node1
+    slave:
+ip_web_xuanzang:
+  name: 玄藏服务器
+  sub_flag: 0
+  need_flag: 1
+  biz_flag: 0
+  tiny_flag: 1
+  choice_index: x4
+  deploy_status_flag: 0
+  modules:
+    - type: microservice
+      name: 玄藏微服务
+      sub_type: xuanzang
+  hosts:
+    master: node2
+    slave:
+ip_web_evaluation:
+  name: 毕升服务器
+  sub_flag: 0
+  need_flag: 1
+  biz_flag: 0
+  tiny_flag: 1
+  choice_index: x5
+  deploy_status_flag: 0
+  modules:
+    - type: microservice
+      name: 毕升微服务
+      sub_type: evaluation
+  hosts:
+    master: node2
+    slave:
+ip_web_dataflow:
+  name: 毕升采集服务器
+  sub_flag: 0
+  need_flag: 1
+  biz_flag: 0
+  tiny_flag: 1
+  choice_index: x10
+  deploy_status_flag: 0
+  modules:
+    - type: microservice
+      name: 毕升采集微服务
+      sub_type: dataflow
+  hosts:
+    master: node2
+    slave:
+ip_web_dataflow_zookeeper:
+  name: 毕升采集ZOOKEEPER服务器
+  sub_flag: 1
+  need_flag: 1
+  biz_flag: 0
+  tiny_flag: 1
+  choice_index: x11
+  deploy_status_flag: 0
+  modules:
+    - type: zookeeper
+      name: 毕升采集zookeeper
+      sub_type: dataflow_zookeeper
+  hosts:
+    master: node1
+    slave:
+ip_web_gisserver:
+  name: 通图服务器
+  sub_flag: 0
+  need_flag: 1
+  biz_flag: 0
+  tiny_flag: 1
+  choice_index: x7
+  deploy_status_flag: 0
+  modules:
+    - type: microservice
+      name: 通图-giscenter
+      sub_type: giscenter
+    - type: microservice
+      name: 通图-gisserver
+      sub_type: gisserver
+  hosts:
+    master: node2
+    slave:
+ip_db_tdengine_3:
+  name: TDengine3服务器
+  sub_flag: 0
+  need_flag: 1
+  biz_flag: 0
+  tiny_flag: 1
+  choice_index: x12
+  deploy_status_flag: 0
+  modules:
+    - type: TDengine3
+      name: 时序数据库3
+      sub_type: TDengine3
+  hosts:
+    master: node1
+    slave:
+ip_web_dex:
+  name: 星桥服务器
+  sub_flag: 1
+  need_flag: 1
+  biz_flag: 0
+  tiny_flag: 1
+  choice_index: s
+  deploy_status_flag: 0
+  modules:
+    - type: microservice
+      name: 星桥微服务
+      sub_type: dex
+  hosts:
+    master: node1
+    slave:
+ip_web_other:
+  name: 其他应用（即时通讯）服务器
+  sub_flag: 0
+  need_flag: 1
+  biz_flag: 0
+  tiny_flag: 1
+  choice_index: s1
+  deploy_status_flag: 0
+  modules:
+    - type: microservice
+      name: 即使通讯服务
+      sub_type: IM
+  hosts:
+    master: node2
+    slave:
+ip_nginx_main:
+  name: 出口nginx服务器
+  sub_flag: 0
+  need_flag: 1
+  biz_flag: 0
+  tiny_flag: 1
+  choice_index: s2
+  deploy_status_flag: 0
+  modules:
+    - type: nginx
+      name: nginx代理
+      sub_type: nginx
+  hosts:
+    master: node3
+    slave:
+ip_web_bigdata:
+  name: 大数据中心(包含星桥)服务器
+  sub_flag: 1
+  need_flag: 0
+  biz_flag: 0
+  tiny_flag: 1
+  choice_index: s3
+  deploy_status_flag: 0
+  modules:
+    - type: microservice
+      name: 大数据中心(包含星桥)
+      sub_type: bigdata
+  hosts:
+    master:
+    slave:
+ip_web_wukong:
+  name: 悟空服务器
+  sub_flag: 1
+  need_flag: 0
+  biz_flag: 0
+  tiny_flag: 1
+  choice_index: s4
+  deploy_status_flag: 0
+  modules:
+    - type: microservice
+      name: wukong微服务
+      sub_type: wukong
+  hosts:
+    master:
+    slave:
+ip_web_kafka:
+  name: kafka服务器
+  sub_flag: 0
+  need_flag: 1
+  biz_flag: 0
+  tiny_flag: 1
+  choice_index: s5
+  deploy_status_flag: 0
+  modules:
+    - type: kafka
+      name: kafka
+      sub_type: kafka
+  hosts:
+    master: node2
+    slave:
+ip_web_usercenter_redis:
+  name: 用户中心REDIS服务器
+  sub_flag: 1
+  need_flag: 1
+  biz_flag: 0
+  tiny_flag: 1
+  choice_index: s6
+  deploy_status_flag: 0
+  modules:
+    - type: redis
+      name: 用户中心内存数据库
+      sub_type: usercenter_redis
+  hosts:
+    master: node1
+    slave:
+ip_web_eurbanpro_media:
+  name: 麒舰多媒体服务器
+  sub_flag: 1
+  need_flag: 1
+  biz_flag: 0
+  tiny_flag: 1
+  choice_index: s7
+  deploy_status_flag: 0
+  modules:
+    - type: microservice
+      name: 麒舰多媒体
+      sub_type: eurbanpro_media
+  hosts:
+    master: node1
+    slave:
+ip_web_eurbanpro_sms:
+  name: 麒舰短信服务器
+  sub_flag: 1
+  need_flag: 1
+  biz_flag: 0
+  tiny_flag: 1
+  choice_index: s8
+  deploy_status_flag: 0
+  modules:
+    - type: microservice
+      name: 麒舰短信
+      sub_type: sms
+  hosts:
+    master: node1
+    slave:
+ip_web_eurbanpro_license:
+  name: 麒舰License服务器
+  sub_flag: 0
+  need_flag: 0
+  biz_flag: 0
+  tiny_flag: 1
+  choice_index: s9
+  deploy_status_flag: 0
+  modules:
+    - type: microservice
+      name: 麒舰License
+      sub_type: license
+  hosts:
+    master:
+    slave:
+ip_web_eurbanpro_patrol_gather:
+  name: 麒舰轨迹采集服务
+  sub_flag: 1
+  need_flag: 1
+  biz_flag: 0
+  tiny_flag: 1
+  choice_index: s10
+  deploy_status_flag: 0
+  modules:
+    - type: microservice
+      name: 麒舰轨迹采集
+      sub_type: patrol_gather
+  hosts:
+    master: node1
+    slave:
+ip_web_eurbanpro_trajectory:
+  name: 麒舰轨迹上传服务
+  sub_flag: 1
+  need_flag: 1
+  biz_flag: 0
+  tiny_flag: 1
+  choice_index: s11
+  deploy_status_flag: 0
+  modules:
+    - type: microservice
+      name: 麒舰轨迹上传
+      sub_type: trajectory
+  hosts:
+    master: node1
+    slave:
+ip_web_wuneng:
+  name: 悟能服务
+  sub_flag: 1
+  need_flag: 0
+  biz_flag: 0
+  tiny_flag: 1
+  choice_index: s12
+  deploy_status_flag: 0
+  modules:
+    - type: microservice
+      name: 悟能服务
+      sub_type: wuneng
+  hosts:
+    master:
+    slave:
+ip_web_export:
+  name: EXPORT导出服务器
+  sub_flag: 0
+  need_flag: 1
+  biz_flag: 0
+  tiny_flag: 1
+  choice_index: m
+  deploy_status_flag: 0
+  modules:
+    - type: microservice
+      name: 导出微服务
+      sub_type: export
+  hosts:
+    master: node1
+    slave:
+ip_web_mis:
+  name: MIS服务器
+  sub_flag: 0
+  need_flag: 0
+  biz_flag: 1
+  tiny_flag: 0
+  choice_index: m1
+  deploy_status_flag: 0
+  modules:
+    - type: service
+      name: 一网统管应用
+      sub_type: eUrbanMIS
+  hosts:
+    master:
+    slave:
+ip_web_uma:
+  name: 运管服服务器
+  sub_flag: 1
+  need_flag: 1
+  biz_flag: 1
+  tiny_flag: 0
+  deploy_status_flag: 0
+  choice_index: m2
+  modules:
+    - type: service
+      name: 运管服应用
+      sub_type: eUrbanUMA
+  hosts:
+    master: node1
+    slave:
+ip_web_mf:
+  name: 市政服务器
+  sub_flag: 1
+  need_flag: 0
+  biz_flag: 1
+  tiny_flag: 0
+  deploy_status_flag: 0
+  choice_index: m3
+  modules:
+    - type: service
+      name: 市政应用
+      sub_type: eUrbanMF
+  hosts:
+    master:
+    slave:
+ip_web_es:
+  name: ES服务器
+  sub_flag: 1
+  need_flag: 0
+  biz_flag: 0
+  tiny_flag: 0
+  choice_index: m4
+  deploy_status_flag: 0
+  modules:
+    - type: elasticsearch
+      name: es索引数据库
+      sub_type: elasticsearch
+  hosts:
+    master:
+    slave:
+ip_web_onlyoffice:
+  name: OnlyOffice服务器
+  sub_flag: 1
+  need_flag: 0
+  biz_flag: 0
+  tiny_flag: 0
+  choice_index: m5
+  deploy_status_flag: 0
+  modules:
+    - type: OnlyOffice
+      name: OnlyOffice服务
+      sub_type: OnlyOffice
+  hosts:
+    master:
+    slave:

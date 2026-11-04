@@ -1,0 +1,923 @@
+mysql:
+  mysql_1:
+    port: "3306"
+    username: root
+    password: Wk2uBTeyp6
+    data_dir: /egova/db/mysql
+    temp_dir: /egova/db/.mysql_temp
+    ip: 172.21.144.107
+    db_type: biz
+    status: success
+    host: node3
+redis:
+  redis_1:
+    port: "6380"
+    password: Wk2uBTeyp6
+    dir: /egova/data/redis
+    ip: 172.21.144.107
+    status: success
+    host: node3
+  redis_2:
+    port: "6380"
+    password: Wk2uBTeyp6
+    dir: /egova/data/redis
+    ip: 172.21.133.221
+    status: success
+    host: node1
+minio:
+  minio_1:
+    port: "30001"
+    access_key: admin
+    secret_key: Wk2uBTeyp6
+    ip: 172.21.133.222
+    catalog_user: egovacatalog
+    catalog_password: Wk2uBTeyp6
+    status: success
+    host: node2
+nginx:
+  nginx_1:
+    port: "8080"
+    status: success
+    host: node3
+    ip: 172.21.144.107
+zookeeper:
+  zookeeper_1:
+    port: "2182"
+    ip: 172.21.144.107
+    status: success
+    host: node3
+  zookeeper_2:
+    port: "2182"
+    ip: 172.21.133.221
+    status: success
+    host: node1
+kafka:
+  kafka_1:
+    port: "9093"
+    ip: 172.21.133.222
+    status: success
+    host: node2
+elasticsearch:
+postgresql:
+  postgresql_1:
+    default_variable_to_avoid_invalid_extra_vars: nothing
+    port: "5432"
+    ip: 172.21.144.107
+    username: postgres
+    password: Wk2uBTeyp6
+    status: success
+    host: node3
+cetus:
+TDengine:
+  TDengine_1:
+    port: "6041"
+    username: root
+    password: eGova@td2023
+    ip: 172.21.144.107
+    status: success
+    host: node3
+service:
+  eUrbanMIS:
+  eUrbanMF:
+  eUrbanUMA:
+    eUrbanUMA_1:
+      name: eUrbanUMA
+      desc: 运管服
+      biz_type: UMA
+      server_port: "8082"
+      base_path: /egova/web
+      depends:
+        - type: mysql
+          name: 业务库
+          database: cgdb
+          sub_type: biz
+          jdbc_type: default
+          depend_key: mysql_1
+        - type: mysql
+          name: 统计库
+          database: cgdbstat
+          sub_type: stat
+          depend_key: mysql_1
+        - type: redis
+          name: redis内存数据库
+          database: 0
+          depend_key: redis_1
+        - type: TDengine
+          name: 时序数据库
+          database: trace
+          depend_key: TDengine_1
+        - type: zookeeper
+          name: zookeeper
+          depend_key: zookeeper_1
+        - type: microservice
+          sub_type: httpfileservice
+          name: http共享目录服务
+          depend_key: httpfileservice_1
+        - type: microservice
+          sub_type: export
+          name: export导出服务
+          depend_key: export_1
+        - type: kafka
+          name: kafka消息队列
+          depend_key: kafka_1
+      status: success
+      host: node1
+      ip: 172.21.133.221
+  eUrbanGIS:
+    eUrbanGIS_1:
+      name: eUrbanGIS
+      desc: GIS
+      biz_type: GIS
+      server_port: "8085"
+      base_path: /egova/web
+      depends:
+        - type: mysql
+          name: 业务库
+          database: cgdb
+          sub_type: biz
+          jdbc_type: gis
+          depend_key: mysql_1
+        - type: redis
+          name: redis内存数据库
+          database: 0
+          depend_key: redis_1
+        - type: postgresql
+          name: PG数据库
+          database: giscenter
+          depend_key: postgresql_1
+        - type: TDengine
+          name: 时序数据库
+          database: trace
+          depend_key: TDengine_1
+        - type: minio
+          name: minio
+          bucket_name: egova
+          depend_key: minio_1
+        - type: microservice
+          sub_type: gisserver
+          name: 通图平台
+          depend_key: gisserver_1
+      status: success
+      host: node2
+      ip: 172.21.133.222
+  eUrbanSG:
+  eGovaPublic:
+  IMserver:
+  statgather:
+microservice:
+  linglong:
+    linglong_1:
+      name: 灵珑
+      category: basic
+      display: 1
+      # 10000是起始端口，自动计算
+      server_port: "10000"
+      login_url: http://ip:8080/linglong/index.html
+      user: admin
+      password: eGova@2023Yhzx
+      wiki: http://faq.egova.com.cn:7777/projects/redmine/wiki/%E7%81%B5%E7%8F%91%E4%B8%80%E9%94%AE%E9%83%A8%E7%BD%B2v2-%E5%BE%AE%E6%9C%8D%E5%8A%A1%E7%89%88
+      base_path: /egova/apps/basic/linglong
+      jar_name: magic-world.jar
+      frontend_path: /egova/apps/basic/linglong/webApps
+      proxy:
+        - source: /linglong-api
+          destination: /linglong-api
+      url:
+        backend: linglong-api
+        frontend: linglong
+      environment:
+        jvm_opts: -Xms128m -Xmx4096m
+      depends:
+        - type: mysql
+          # 子类型，对于mysql，可区分业务库和统计库
+          sub_type: biz
+          name: mysql业务库
+          database: linglong
+          depend_key: mysql_1
+        - type: redis
+          sub_type:
+          name: redis
+          database: 4
+          depend_key: redis_1
+        - type: minio
+          name: minio
+          bucket_name: linglong
+          depend_key: minio_1
+        - type: nacos
+          name: nacos中心
+          depend_key: nacos_1
+        - type: microservice
+          sub_type: usercenter
+          name: 用户中心2.0
+          depend_key: usercenter_1
+        - type: usercenter_redis
+          name: usercenter_redis内存数据库
+          database: 3
+          sub_type: usercenter_redis
+          depend_key: redis_2
+      status: success
+      host: node1
+      ip: 172.21.133.221
+  wukong:
+  dex:
+    dex_1:
+      name: 星桥
+      category: basic
+      display: 1
+      login_url: http://ip:8080/dex/index.html
+      user: egovaadmin
+      password: eGova@2023Yhzx
+      wiki: http://faq.egova.com.cn:7777/projects/redmine/wiki/%E6%98%9F%E6%A1%A5%E5%A4%A7%E6%95%B0%E6%8D%AE20%E4%B8%80%E9%94%AE%E9%83%A8%E7%BD%B2v2
+      server_port: "10020"
+      base_path: /egova/apps/basic/dex
+      jar_name: data-exchange.jar
+      frontend_path: /egova/apps/basic/dex/webApps
+      proxy:
+        - source: /dex-api
+          destination: /dex-api
+      url:
+        backend: dex-api
+        frontend: dex
+      environment:
+        jvm_opts: -Xms128m -Xmx2048m
+      depends:
+        - type: mysql
+          name: 业务库
+          database: data_exchange
+          sub_type: biz
+          depend_key: mysql_1
+        - type: redis
+          name: redis内存数据库
+          database: 7
+          depend_key: redis_1
+      status: success
+      host: node1
+      ip: 172.21.133.221
+  httpfileservice:
+    httpfileservice_1:
+      name: http共享目录服务
+      category: basic
+      display: 1
+      server_port: "8086"
+      base_path: /egova/apps/basic/httpfileservice
+      jar_name: egova-httpfileserver-netty-1.0.0.jar
+      frontend_path:
+      proxy: []
+      url:
+        backend:
+        frontend:
+      environment:
+        jvm_opts: -Xms256m -Xmx512m
+      depends: []
+      status: success
+      host: node2
+      ip: 172.21.133.222
+      login_url: "null"
+  evaluation:
+    evaluation_1:
+      name: 毕升（麒舰版）
+      category: basic
+      display: 1
+      version_flag: 1
+      login_url: http://ip:8080/evaluation/index.html
+      wiki: http://faq.egova.com.cn:7777/projects/redmine/wiki/%E6%AF%95%E5%8D%87%E4%B8%80%E9%94%AE%E9%83%A8%E7%BD%B2%E9%BA%92%E8%88%B0%E7%89%88%E6%9C%AC
+      server_port: "10040"
+      base_path: /egova/apps/basic/evaluation
+      jar_name: egova-stat-service-1.0.0-SNAPSHOT.jar
+      frontend_path: /egova/apps/basic/evaluation/webApps
+      proxy:
+        - source: /bi-api
+          destination: /bi-api
+      url:
+        backend: bi-api
+        frontend: evaluation
+      environment:
+        jvm_opts: -Xms128m -Xmx2048m
+      depends:
+        - type: mysql
+          sub_type: biz
+          name: 毕升库
+          database: becensus
+          depend_key: mysql_1
+        - type: redis
+          name: redis内存数据库
+          database: 0
+          depend_key: redis_1
+        - type: nacos
+          name: nacos中心
+          depend_key: nacos_1
+        - type: usercenter_redis
+          name: usercenter_redis内存数据库
+          database: 3
+          sub_type: usercenter_redis
+          depend_key: redis_2
+      status: success
+      host: node2
+      ip: 172.21.133.222
+  export:
+    export_1:
+      name: export2.0导出服务
+      category: basic
+      display: 1
+      server_port: "10110"
+      base_path: /egova/apps/basic/export
+      jar_name: egova-service-export-2.0.0-SNAPSHOT.jar
+      frontend_path:
+      proxy: []
+      url:
+        backend:
+        frontend:
+      environment:
+        jvm_opts: -Xms128m -Xmx2024m
+      depends:
+        - type: mysql
+          sub_type: biz
+          name: 毕升库
+          database: becensus
+          depend_key: mysql_1
+        - type: redis
+          name: redis内存数据库
+          database: 0
+          depend_key: redis_1
+        - type: nacos
+          name: nacos中心
+          depend_key: nacos_1
+        - type: microservice
+          name: http共享目录服务
+          sub_type: httpfileservice
+          depend_key: httpfileservice_1
+      status: success
+      host: node1
+      ip: 172.21.133.221
+      login_url: "null"
+  usercenter:
+    usercenter_1:
+      name: 用户中心2.0
+      category: basic
+      display: 1
+      login_url: http://ip:8080/usercenter/index.html
+      user: admin
+      password: eGova@2023Yhzx
+      wiki: http://faq.egova.com.cn:7777/projects/redmine/wiki/%E7%BB%9F%E4%B8%80%E7%94%A8%E6%88%B7%E4%B8%AD%E5%BF%8320-%E4%B8%80%E9%94%AE%E9%83%A8%E7%BD%B2v2
+      server_port: "10050"
+      base_path: /egova/apps/basic/usercenter
+      jar_name: egova-usercenter.jar
+      frontend_path: /egova/apps/basic/usercenter/webApps
+      vue_version: 3
+      proxy:
+        - source: /usercenter-api
+          destination: /usercenter-api
+      url:
+        backend: usercenter-api
+        frontend: usercenter
+      environment:
+        jvm_opts: -Xms128m -Xmx2048m
+      depends:
+        - type: mysql
+          name: 业务库
+          database: usercenter
+          sub_type: biz
+          depend_key: mysql_1
+        - type: redis
+          name: redis内存数据库
+          database: 3
+          sub_type: usercenter_redis
+          depend_key: redis_2
+        - type: nacos
+          name: nacos中心
+          depend_key: nacos_1
+        - type: kafka
+          name: kafka消息队列
+          depend_key: kafka_1
+      status: success
+      host: node2
+      ip: 172.21.133.222
+    usercenter_2:
+      name: 用户中心2.0
+      category: basic
+      display: 1
+      login_url: http://ip:8080/usercenter/index.html
+      user: admin
+      password: eGova@2023Yhzx
+      wiki: http://faq.egova.com.cn:7777/projects/redmine/wiki/%E7%BB%9F%E4%B8%80%E7%94%A8%E6%88%B7%E4%B8%AD%E5%BF%8320-%E4%B8%80%E9%94%AE%E9%83%A8%E7%BD%B2v2
+      server_port: "10050"
+      base_path: /egova/apps/basic/usercenter
+      jar_name: egova-usercenter.jar
+      frontend_path: /egova/apps/basic/usercenter/webApps
+      vue_version: 3
+      proxy:
+        - source: /usercenter-api
+          destination: /usercenter-api
+      url:
+        backend: usercenter-api
+        frontend: usercenter
+      environment:
+        jvm_opts: -Xms128m -Xmx2048m
+      depends:
+        - type: mysql
+          name: 业务库
+          database: usercenter
+          sub_type: biz
+          depend_key: mysql_1
+        - type: redis
+          name: redis内存数据库
+          database: 3
+          sub_type: usercenter_redis
+          depend_key: redis_2
+        - type: nacos
+          name: nacos中心
+          depend_key: nacos_1
+        - type: kafka
+          name: kafka消息队列
+          depend_key: kafka_1
+      status: success
+      host: node3
+      ip: 172.21.144.107
+  eurbanpro:
+    eurbanpro_1:
+      name: 麒舰平台
+      category: eurbanpro
+      display: 1
+      login_url: http://ip:8080/eurbanpro/index.html#/
+      user: egova
+      password: eGova@2024
+      server_port: "16000"
+      base_path: /egova/apps/basic/eurbanpro
+      jar_name: egova-urbanpro-mis-service.jar
+      frontend_path: /egova/apps/basic/eurbanpro/webapps
+      vue_version: 3
+      proxy:
+        - source: /eurbanpro-api
+          destination: /eurbanpro-api
+      url:
+        backend: eurbanpro-api
+        frontend: eurbanpro
+      environment:
+        jvm_opts: -Xms128m -Xmx4096m
+      depends:
+        - type: mysql
+          sub_type: biz
+          name: mysql业务库
+          database: eurbanpro
+          depend_key: mysql_1
+        - type: redis
+          sub_type:
+          name: redis
+          database: 2
+          depend_key: redis_1
+        - type: usercenter_redis
+          name: usercenter_redis内存数据库
+          database: 3
+          sub_type: usercenter_redis
+          depend_key: redis_2
+        - type: nacos
+          name: nacos中心
+          depend_key: nacos_1
+        - type: zookeeper
+          name: zookeeper
+          depend_key: zookeeper_1
+        - type: TDengine3
+          name: 时序数据库
+          database: trace
+          depend_key: TDengine3_1
+      status: success
+      host: node2
+      ip: 172.21.133.222
+  patrol_gather:
+    patrol_gather_1:
+      name: 麒舰轨迹采集服务
+      category: eurbanpro
+      display: 1
+      server_port: "16040"
+      base_path: /egova/apps/basic/patrol_gather
+      jar_name: egova-urbanpro-patrol-gather-service.jar
+      frontend_path:
+      proxy:
+        - source: /patrol-gather-api
+          destination: /patrol-gather-api
+      url:
+        backend: patrol-gather-api
+        frontend:
+      environment:
+        jvm_opts: -Xms128m -Xmx512m
+      depends:
+        - type: mysql
+          sub_type: biz
+          name: mysql业务库
+          database: eurbanpro
+          depend_key: mysql_1
+        - type: redis
+          sub_type:
+          name: redis
+          database: 2
+          depend_key: redis_1
+        - type: usercenter_redis
+          name: usercenter_redis内存数据库
+          database: 3
+          sub_type: usercenter_redis
+          depend_key: redis_2
+        - type: nacos
+          name: nacos中心
+          depend_key: nacos_1
+        - type: TDengine3
+          name: 时序数据库
+          database: trace
+          depend_key: TDengine3_1
+      status: success
+      host: node1
+      ip: 172.21.133.221
+      login_url: "null"
+  workflow:
+    workflow_1:
+      name: 麒舰流程中心
+      category: eurbanpro
+      display: 1
+      server_port: "16010"
+      base_path: /egova/apps/basic/workflow
+      jar_name: egova-urbanpro-workflow-service.jar
+      frontend_path: /egova/apps/basic/workflow/webapps
+      vue_version: 3
+      proxy:
+        - source: /workflow-api
+          destination: /workflow-center-api
+      url:
+        backend: workflow-center-api
+        frontend: workflow
+      environment:
+        jvm_opts: -Xms128m -Xmx512m
+      depends:
+        - type: mysql
+          sub_type: biz
+          name: mysql业务库
+          database: eurbanpro
+          depend_key: mysql_1
+        - type: redis
+          sub_type:
+          name: redis
+          database: 2
+          depend_key: redis_1
+        - type: usercenter_redis
+          name: usercenter_redis内存数据库
+          database: 3
+          sub_type: usercenter_redis
+          depend_key: redis_2
+        - type: nacos
+          name: nacos中心
+          depend_key: nacos_1
+      status: success
+      host: node2
+      ip: 172.21.133.222
+      login_url: "null"
+  xuanzang:
+    xuanzang_1:
+      name: GIS-玄藏
+      category: gis
+      display: 1
+      login_url: http://172.21.133.222:10070/xuanzang/index.html
+      wiki: http://faq.egova.com.cn:7777/projects/redmine/wiki/%E7%8E%84%E8%97%8F%E4%B8%80%E9%94%AE%E9%83%A8%E7%BD%B2v2
+      server_port: "10070"
+      base_path: /egova/apps/gis/xuanzang
+      jar_name: egova-gis-xuanzang-service.jar
+      frontend_path: /egova/apps/gis/xuanzang/webApps
+      vue_version: 3
+      proxy:
+        - source: /xuanzang-api
+          destination: /xuanzang-api
+      url:
+        backend: xuanzang-api
+        frontend: xuanzang
+      environment:
+        jvm_opts: -Xms128m -Xmx2048m
+      depends:
+        - type: mysql
+          name: 业务库
+          database: xuanzang
+          sub_type: biz
+          depend_key: mysql_1
+        - type: redis
+          name: redis内存数据库
+          database: 10
+          depend_key: redis_1
+        - type: usercenter_redis
+          name: usercenter_redis内存数据库
+          database: 3
+          sub_type: usercenter_redis
+          depend_key: redis_2
+        - type: postgresql
+          name: PG数据库
+          database: giscenter
+          depend_key: postgresql_1
+        - type: minio
+          name: minio
+          bucket_name: xuanzang
+          depend_key: minio_1
+        - type: nacos
+          name: nacos中心
+          depend_key: nacos_1
+      status: success
+      host: node2
+      ip: 172.21.133.222
+  dataflow:
+    dataflow_1:
+      name: 毕升采集
+      category: basic
+      display: 1
+      login_url: http://ip:8080/dataflow/index.html
+      user: admin
+      password: eGova@2023Yhzx
+      wiki: http://faq.egova.com.cn:7777/projects/redmine/wiki/%E6%AF%95%E5%8D%87%E9%87%87%E9%9B%86%E4%B8%80%E9%94%AE%E9%83%A8%E7%BD%B2v2
+      server_port: "10080"
+      base_path: /egova/apps/basic/dataflow
+      jar_name: egova-dataflow.jar
+      frontend_path: /egova/apps/basic/dataflow/webApps
+      vue_version: 3
+      proxy:
+        - source: /dataflow-api
+          destination: /dataflow-api
+      url:
+        backend: dataflow-api
+        frontend: dataflow
+      environment:
+        jvm_opts: -Xms128m -Xmx2048m
+      depends:
+        - type: mysql
+          name: 业务库
+          database: dataflow
+          sub_type: biz
+          depend_key: mysql_1
+        - type: redis
+          name: redis内存数据库
+          database: 3
+          sub_type: usercenter_redis
+          depend_key: redis_2
+        - type: nacos
+          name: nacos中心
+          depend_key: nacos_1
+        - type: zookeeper
+          name: zookeeper
+          sub_type: dataflow_zookeeper
+          depend_key: zookeeper_2
+      status: success
+      host: node2
+      ip: 172.21.133.222
+  giscenter:
+    giscenter_1:
+      name: 通图-giscenter
+      category: gis
+      display: 1
+      server_port: "8096"
+      base_path: /egova/web/egovagisserver/giscenter
+      jar_name: egova-service-gis-cimcenter-1.1.0-SNAPSHOT.jar
+      frontend_path:
+      proxy:
+        - source: /egovagisserver/service-center
+          destination: /service-center
+        - source: /egovagisserver/services
+          destination: /services
+        - source: /egovagisserver/data
+          destination: /data
+        - source: /egovagisserver/map/
+          destination: /
+      url:
+        backend:
+        frontend:
+      environment:
+        jvm_opts: -Xms128m -Xmx512m
+        jdk_version: 11
+      depends:
+        - type: mysql
+          name: mysql业务库
+          database: giscenter
+          sub_type: biz
+          depend_key: mysql_1
+        - type: redis
+          name: redis内存数据库
+          database: 0
+          depend_key: redis_1
+        - type: minio
+          name: minio
+          bucket_name: egova
+          depend_key: minio_1
+        - type: postgresql
+          name: PG数据库
+          database: giscenter
+          depend_key: postgresql_1
+        - type: nacos
+          name: nacos中心
+          depend_key: nacos_1
+      status: success
+      host: node2
+      ip: 172.21.133.222
+      login_url: "null"
+  gisserver:
+    gisserver_1:
+      name: 通图-gisserver
+      category: gis
+      display: 1
+      server_port: "8094"
+      base_path: /egova/web/egovagisserver/gisserver
+      jar_name: egova-service-gis-cimserver-1.1.0-SNAPSHOT.jar
+      frontend_path: /egova/web/egovagisserver/gisserver/webApps
+      proxy:
+        - source: /egovagisserver/service/
+          destination: /
+        - source: /egovagisserver/tile/
+          destination: /
+      url:
+        backend:
+        frontend:
+      environment:
+        jvm_opts: -Xms256m -Xmx2048m
+        jdk_version: 11
+      depends:
+        - type: nacos
+          name: nacos中心
+          depend_key: nacos_1
+        - type: microservice
+          name: 通图-giscenter
+          sub_type: giscenter
+          depend_key: giscenter_1
+      status: success
+      host: node2
+      ip: 172.21.133.222
+      login_url: "null"
+  IM:
+    IM_1:
+      name: 麒舰即时通讯
+      category: basic
+      display: 1
+      server_port: 16030
+      base_path: /egova/apps/basic/IM
+      proxy:
+        - source: /im-api
+          destination: 10011
+        - source: /im-msg-gateway
+          destination: 10001
+        - source: /im-jssdk-gateway
+          destination: 10003
+      url:
+        backend:
+        frontend:
+      environment:
+        jvm_opts: -Xms256m -Xmx512m
+      depends:
+        - type: mysql
+          sub_type: biz
+          name: mysql业务库
+          database: open_im
+          depend_key: mysql_1
+        - type: zookeeper
+          name: zookeeper
+          depend_key: zookeeper_1
+        - type: kafka
+          name: kafka消息队列
+          depend_key: kafka_1
+        - type: microservice
+          sub_type: usercenter
+          name: 用户中心2.0
+          depend_key: usercenter_1
+      status: success
+      host: node2
+      ip: 172.21.133.222
+  eurbanpro_media:
+    eurbanpro_media_1:
+      name: 麒舰多媒体服务
+      category: eurbanpro
+      display: 1
+      server_port: "16020"
+      base_path: /egova/apps/basic/eurbanpro_media
+      jar_name: egova-urbanpro-media-service.jar
+      frontend_path: #TODO，脚本需要兼容前后端为空的情况
+      proxy:
+        - source: /media-api
+          destination: /media-api
+      url:
+        backend: media-api
+        frontend: media
+      environment:
+        jvm_opts: -Xms128m -Xmx512m
+      depends:
+        - type: mysql
+          sub_type: biz
+          name: mysql业务库
+          database: eurbanpro
+          depend_key: mysql_1
+        - type: redis
+          sub_type:
+          name: redis
+          database: 2
+          depend_key: redis_1
+        - type: usercenter_redis
+          name: usercenter_redis内存数据库
+          database: 3
+          sub_type: usercenter_redis
+          depend_key: redis_2
+        - type: nacos
+          name: nacos中心
+          depend_key: nacos_1
+      status: success
+      host: node1
+      ip: 172.21.133.221
+      login_url: "null"
+  sms:
+    sms_1:
+      name: 麒舰短信服务
+      category: eurbanpro
+      display: 1
+      server_port: "11004"
+      base_path: /egova/apps/basic/sms
+      jar_name: egova-urbanpro-sms-service.jar
+      frontend_path: #TODO，脚本需要兼容前后端为空的情况
+      proxy:
+        - source: /sms-api
+          destination: /sms-api
+      url:
+        backend: sms-api
+        frontend: sms
+      environment:
+        jvm_opts: -Xms128m -Xmx512m
+      depends:
+        - type: mysql
+          sub_type: biz
+          name: mysql业务库
+          database: eurbanpro
+          depend_key: mysql_1
+        - type: redis
+          sub_type:
+          name: redis
+          database: 2
+          depend_key: redis_1
+        - type: usercenter_redis
+          name: usercenter_redis内存数据库
+          database: 3
+          sub_type: usercenter_redis
+          depend_key: redis_2
+        - type: nacos
+          name: nacos中心
+          depend_key: nacos_1
+      status: success
+      host: node1
+      ip: 172.21.133.221
+      login_url: "null"
+  trajectory:
+    trajectory_1:
+      name: 麒舰轨迹上传服务
+      category: eurbanpro
+      display: 1
+      server_port: "16050"
+      base_path: /egova/apps/basic/trajectory
+      jar_name: egova-urbanpro-trajectory-service.jar
+      frontend_path:
+      proxy:
+        - source: /eurbanpro-api/unity/mis/position/update-position
+          destination: /trajectory-api/unity/mis/position/update-position
+      url:
+        backend: trajectory-api
+        frontend:
+      environment:
+        jvm_opts: -Xms128m -Xmx512m
+      depends:
+        - type: mysql
+          sub_type: biz
+          name: mysql业务库
+          database: eurbanpro
+          depend_key: mysql_1
+        - type: redis
+          sub_type:
+          name: redis
+          database: 2
+          depend_key: redis_1
+        - type: usercenter_redis
+          name: usercenter_redis内存数据库
+          database: 3
+          sub_type: usercenter_redis
+          depend_key: redis_2
+        - type: nacos
+          name: nacos中心
+          depend_key: nacos_1
+        - type: TDengine3
+          name: 时序数据库
+          database: trace
+          depend_key: TDengine3_1
+      status: success
+      host: node1
+      ip: 172.21.133.221
+      login_url: "null"
+nacos:
+  nacos_1:
+    port: "8848"
+    access_key: nacos
+    secret_key: tsEKh9a82C
+    ip: 172.21.144.107
+    space_name: egova
+    status: success
+    host: node3
+TDengine3:
+  TDengine3_1:
+    port: "6041"
+    native_port: "6030"
+    username: root
+    password: eGova@td2023
+    ip: 172.21.133.221
+    status: success
+    host: node1
