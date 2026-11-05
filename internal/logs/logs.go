@@ -92,21 +92,49 @@ type LogFile struct {
 }
 
 // cleanPatternsFor 按目标类别返回「只删日志模式」白名单。
-// 应用日志目录：*.log *.out 及轮转归档；支持软件额外按 kind 约定扩展。
+// 应用日志目录：*.log *.out 及轮转归档；支持软件按 kind 约定扩展。
+// 覆盖《信创第三方软件拉包打包矩阵》日志型软件的文件名形态。
 func cleanPatternsFor(t Target) []string {
 	pats := []string{"*.log", "*.log.[0-9]*", "*.log-20*", "*.out", "*.out.[0-9]*", "*.gz", "*.xz", "*.zip"}
 	switch t.KindRaw {
-	case "mysql":
+	case "mysql", "mysql_log", "percona", "mydumper":
 		// mysql data 目录：错误日志与慢日志；binlog 默认不删（DBA 域，需显式加 pattern）
-		pats = append(pats, "*.err", "*slow.log", "mysql-slow*.log", "slowquery*.log")
+		pats = append(pats, "*.err", "*slow.log", "mysql-slow*.log", "slowquery*.log", "mysqld.log*")
 	case "dm":
 		// 达梦 log 目录：dm_*.log 与归档
 		pats = append(pats, "dm_*.log", "DMSERVER*.log")
-	case "redis":
+	case "redis", "redis_log":
 		// redis 通常单文件 + 手动轮转
 		pats = append(pats, "redis*.log*")
-	case "nginx":
+	case "nginx", "nginx_log", "openresty":
 		pats = append(pats, "access.log*", "error.log*", "host.access.*")
+	case "postgres":
+		// pg_log：postgresql-*.log；WAL/数据文件白名单外不碰
+		pats = append(pats, "postgresql-*.log*", "pg_log/*.log")
+	case "kafka":
+		// kafka log_path 下：server/controller/state-change/request 等 .log 与 .log.[0-9] 滚动（已被基础 *.log 覆盖）
+		pats = append(pats, "kafka-request.log*", "kafka-authorizer.log*")
+	case "elasticsearch":
+		pats = append(pats, "*_server.json", "*_index_indexing_slowlog.json", "*_search_slowlog.json",
+			"gc.log*", "*.json.[0-9]*")
+	case "zookeeper":
+		pats = append(pats, "zookeeper-*.log*", "transaction.log*")
+	case "tdengine", "tdengine3":
+		// taosdlog.0 按序滚动；目录里还有 taosdump 等临时文件不碰
+		pats = append(pats, "taosdlog.[0-9]*", "taosdlog", "*.log.[0-9]*")
+	case "nacos":
+		pats = append(pats, "nacos.log*", "alipay-jraft.log*", "rotated-*.log*")
+	case "minio":
+		pats = append(pats, "minio*.log*")
+	case "docker":
+		// json-file 驱动：containers/<id>/<id>-json.log
+		pats = append(pats, "*-json.log*")
+	case "proxysql":
+		pats = append(pats, "proxysql.log*")
+	case "cetus":
+		pats = append(pats, "cetus*.log*")
+	case "onlyoffice":
+		pats = append(pats, "*.out", "converterout.log*", "docservice.out*")
 	}
 	return pats
 }

@@ -18,10 +18,10 @@ import (
 	"github.com/majq1990/app-updater-go/internal/syncx"
 )
 
-// sshOverride CLI/环境变量层面的 SSH 覆盖（与 newRunner 同语义）。
+// sshOverride CLI/环境变量层面的 SSH 覆盖（与 newRunner 同语义，密码读入走单点函数）。
 func sshOverride() sshx.Auth {
 	return sshx.Auth{
-		Password: firstStr(os.Getenv("APP_UPDATER_SSH_PASS"), ""),
+		Password: sshPassOrDefault(""),
 	}
 }
 
@@ -251,6 +251,38 @@ func cmdLogsRotateCheck(args []string) error {
 	return nil
 }
 
+// safeLocalDir 本地输出目录校验：逐段拒绝控制字符、路径穿越（..）、空段名。
+// 允许相对与绝对路径（用户指定输出位置是正当需求），但路径必须逐段"像路径"。
+func safeLocalDir(dir string) error {
+	if strings.ContainsAny(dir, "\x00\n\r") {
+		return fmt.Errorf("含控制字符: %q", dir)
+	}
+	for _, seg := range strings.FieldsFunc(filepath.ToSlash(dir), func(r rune) bool { return r == '/' }) {
+		if seg == ".." {
+			return fmt.Errorf("含路径穿越段 ..: %q", dir)
+		}
+		if seg == "" || strings.ContainsAny(seg, "\x00\n\r\"'`$;&|<>(){}\\") {
+			return fmt.Errorf("目录段非法: %q", seg)
+		}
+	}
+	return nil
+}
+
+// safeSelector 校验 --app/--support 筛选值（CLI 直传数据，进片段路径推导）。
+// 白名单：字母数字-_，逗号分隔多值；其余拒绝（中文应用名走配置校验层，不走 shell 路径）。
+func safeSelector(v string) error {
+	for _, p := range strings.Split(v, ",") {
+		for _, r := range strings.TrimSpace(p) {
+			switch {
+			case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_', r == '.':
+			default:
+				return fmt.Errorf("筛选值 %q 含非常规字符（只允许字母数字-_，逗号分隔）", p)
+			}
+		}
+	}
+	return nil
+}
+
 // cmdLogsRotateSetup 变更：生成并推送 /etc/logrotate.d/ 片段。
 // 闸门：dry-run 展示将写入的片段内容与目标清单 → --yes 才推送 → 远端 logrotate -d 语法验证
 // → 不强制轮转（绝不 logrotate -f）。已有片段差异展示提示合并（diff 由人判断）。
@@ -263,6 +295,15 @@ func cmdLogsRotateSetup(args []string) error {
 	yes := fs.Bool("yes", false, "确认推送")
 	force := fs.Bool("force", false, "远端已有内容不同的片段时强制覆盖（默认跳过并展示差异）")
 	fs.Parse(args)
+
+	// CLI 直传筛选值进片段路径推导（filterTargets→RotateFragmentName→uploadString），
+	// 白名单校验从入口斩断命令行参数到远端路径的数据流。
+	if err := safeSelector(*app); err != nil {
+		return fmt.Errorf("--app %v", err)
+	}
+	if err := safeSelector(*support); err != nil {
+		return fmt.Errorf("--support %v", err)
+	}
 
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
@@ -405,7 +446,12 @@ func (r sshRotater) ReadFile(p string) (string, error) {
 func (r sshRotater) Run(cmd string) (string, error) { return r.c.Run(cmd) }
 
 // uploadString 小文本上传（logrotate 片段）：本地临时文件 + SFTP 上传到 .eops-new。
+// remotePath 本函数内强校验（终点闸：无论调用方是谁，进 SFTP 的远端路径必须干净）——
+// 只允许 /etc/logrotate.d/<字母数字-_>.eops-new 形态。
 func uploadString(c appflow.Conn, remotePath, content string) error {
+	if !rotateFragPathOK(remotePath) {
+		return fmt.Errorf("远端路径不符合 logrotate 片段白名单形态，拒绝上传: %q", remotePath)
+	}
 	local, err := os.CreateTemp("", "eops-rotate-*.conf")
 	if err != nil {
 		return err
@@ -418,6 +464,29 @@ func uploadString(c appflow.Conn, remotePath, content string) error {
 	local.Close()
 	// 复用 syncx 上传语义：传到远端后保留 mtime 即可（权限 mv 后 root 默认）
 	return c.Upload(local.Name(), remotePath, time.Now())
+}
+
+// rotateFragPathOK logrotate 片段路径白名单：/etc/logrotate.d/<name> 或其 .eops-new/.broken 临时态。
+// name 仅允许字母数字-_.（与 logs.sanitize 的输出字符集一致）。
+func rotateFragPathOK(p string) bool {
+	for _, prefix := range []string{"/etc/logrotate.d/"} {
+		if strings.HasPrefix(p, prefix) {
+			name := strings.TrimPrefix(p, prefix)
+			name = strings.TrimSuffix(strings.TrimSuffix(name, ".eops-new"), ".broken")
+			if name == "" {
+				return false
+			}
+			for _, r := range name {
+				switch {
+				case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_', r == '.':
+				default:
+					return false
+				}
+			}
+			return true
+		}
+	}
+	return false
 }
 func cmdLogsGather(args []string) error {
 	fs := flag.NewFlagSet("logs gather", flag.ExitOnError)
@@ -447,6 +516,10 @@ func cmdLogsGather(args []string) error {
 	outDir := *out
 	if outDir == "" {
 		outDir = filepath.Join("logs-gather", time.Now().Format("20060102-150405"))
+	} else if err := safeLocalDir(outDir); err != nil {
+		// CLI 直传本地输出目录的终点闸：拒绝控制字符与路径穿越段，
+		// 允许相对/绝对路径（用户指定输出位置是正当需求），但目录名逐段校验。
+		return fmt.Errorf("--out %v", err)
 	}
 
 	dial := &execDialer{cfg: cfg, over: sshOverride()}

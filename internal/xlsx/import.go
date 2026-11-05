@@ -137,10 +137,12 @@ func Import(path string) (*config.Config, []config.Issue, error) {
 			if i < 2 || len(row) < 2 {
 				continue
 			}
-			kind := strings.TrimSpace(row[0])
-			if kind == "" || strings.HasPrefix(kind, ExamplePrefix) {
+			// 示例判断用原始值；kind 随后做别名归一（postgresql→postgres 等）
+			rawKind := strings.TrimSpace(row[0])
+			if rawKind == "" || strings.HasPrefix(rawKind, ExamplePrefix) {
 				continue
 			}
+			kind := config.NormalizeSupportKind(rawKind)
 			where := fmt.Sprintf("%s!第%d行", SheetSupports, i+1)
 			get := func(c int) string {
 				if c < len(row) {

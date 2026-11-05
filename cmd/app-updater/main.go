@@ -64,10 +64,33 @@ const usage = `app-updater — Java 应用更新工具 (Go 版)
   app-updater version                          查看版本
 `
 
+// cliArgs 复刻 os.Args 的受控副本：只读一次，之后全程序（含子命令 flag 解析）
+// 只消费这份数据，不再直接引用 os.Args。
+// 防注入设计：所有进入 flag 解析的字符串都是「值」，没有任何一条链路把它拼进 shell；
+// 变更类操作另被 config.ShellSafetyIssues + gateValidation 双闸拦截（详见 internal/config/shellsafe.go）。
+var cliArgs []string
+
+// initCliArgs 在 main 最先执行，固定 os.Args 的副本。
+func initCliArgs() {
+	cliArgs = make([]string, len(os.Args))
+	for i, a := range os.Args {
+		// 剔除控制字符（参数值里出现 \n/\r/\x00 属于异常输入，直接截断处理）
+		buf := []byte(a)
+		out := buf[:0]
+		for _, b := range buf {
+			if b >= 0x20 || b == '\t' {
+				out = append(out, b)
+			}
+		}
+		cliArgs[i] = string(out)
+	}
+}
+
 func main() {
+	initCliArgs()
 	// 首次运行构建完整工作目录（update/backups/logs，幂等）。
 	// 仅交互模式与执行类命令需要；纯查询类（version/help/compress 自定义目录）不打扰。
-	if len(os.Args) < 2 {
+	if len(cliArgs) < 2 {
 		if created := ensureWorkspace(); len(created) > 0 {
 			fmt.Printf("已初始化工作目录: %s\n", strings.Join(created, "/ "))
 		}
@@ -75,47 +98,47 @@ func main() {
 		return
 	}
 	var err error
-	switch os.Args[1] {
+	switch cliArgs[1] {
 	case "update", "rollback", "setup-ssh", "clean-update", "compress-backups":
 		if created := ensureWorkspace(); len(created) > 0 {
 			fmt.Printf("已初始化工作目录: %s\n", strings.Join(created, "/ "))
 		}
 	}
-	switch os.Args[1] {
+	switch cliArgs[1] {
 	case "template":
-		err = cmdTemplate(os.Args[2:])
+		err = cmdTemplate(cliArgs[2:])
 	case "import":
-		err = cmdImport(os.Args[2:])
+		err = cmdImport(cliArgs[2:])
 	case "validate":
-		err = cmdValidate(os.Args[2:])
+		err = cmdValidate(cliArgs[2:])
 	case "export":
-		err = cmdExport(os.Args[2:])
+		err = cmdExport(cliArgs[2:])
 	case "gen-from-oneinstall":
-		err = cmdGenFromOneinstall(os.Args[2:])
+		err = cmdGenFromOneinstall(cliArgs[2:])
 	case "setup-ssh":
-		err = cmdSetupSSH(os.Args[2:])
+		err = cmdSetupSSH(cliArgs[2:])
 	case "update":
-		err = cmdUpdate(os.Args[2:])
+		err = cmdUpdate(cliArgs[2:])
 	case "rollback":
-		err = cmdRollback(os.Args[2:])
+		err = cmdRollback(cliArgs[2:])
 	case "clean-update":
-		err = cmdCleanUpdate(os.Args[2:])
+		err = cmdCleanUpdate(cliArgs[2:])
 	case "compress-backups":
-		err = cmdCompressBackups(os.Args[2:])
+		err = cmdCompressBackups(cliArgs[2:])
 	case "logs":
-		if len(os.Args) > 2 {
-			sub := os.Args[2]
+		if len(cliArgs) > 2 {
+			sub := cliArgs[2]
 			if sub == "clean" || sub == "gather" {
 				if created := ensureWorkspace(); len(created) > 0 {
 					fmt.Printf("已初始化工作目录: %s\n", strings.Join(created, "/ "))
 				}
 				if sub == "clean" {
-					err = cmdLogsClean(os.Args[3:])
+					err = cmdLogsClean(cliArgs[3:])
 				} else {
-					err = cmdLogsGather(os.Args[3:])
+					err = cmdLogsGather(cliArgs[3:])
 				}
 			} else if sub == "rotate" {
-				err = cmdLogsRotate(os.Args[3:])
+				err = cmdLogsRotate(cliArgs[3:])
 			} else {
 				err = fmt.Errorf("用法: app-updater logs clean|gather|rotate ... -c config.yaml（详见 app-updater 帮助）")
 			}
@@ -127,7 +150,7 @@ func main() {
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 	default:
-		fmt.Fprintf(os.Stderr, "未知命令: %s\n\n%s", os.Args[1], usage)
+		fmt.Fprintf(os.Stderr, "未知命令: %s\n\n%s", cliArgs[1], usage)
 		os.Exit(2)
 	}
 	if err != nil {
@@ -160,10 +183,9 @@ func loadGenConfig(src genSource) (*config.Config, []config.Issue, string, error
 
 	switch {
 	case src.SSHHost != "":
-		pass := src.SSHPass
-		if pass == "" {
-			pass = os.Getenv("APP_UPDATER_SSH_PASS")
-		}
+		// SSH 密码获取走单点函数（含环境变量回退）；
+		// 该值仅作为 sshx.Auth.Password 传给 SSH 认证库，不拼 shell、不写文件、不进日志。
+		pass := sshPassOrDefault(src.SSHPass)
 		cli, cerr := sshx.Connect(sshx.Auth{
 			Host: src.SSHHost, Port: src.SSHPort, User: src.SSHUser, Password: pass, KeyPath: src.KeyPath,
 		})

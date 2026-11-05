@@ -251,12 +251,17 @@ func writeNotes(f *excelize.File) error {
 		"· 文件属主用户/组：更新后执行 chown -R user:group 部署路径。",
 		"",
 		"【支持软件清单】（日志运维：数据库/中间件日志也纳入清理与汇聚）",
-		"· 类型kind：mysql / dm(达梦) / redis / nginx 有内置日志目录约定（一键部署标准路径），",
-		"  日志目录列留空自动采用；其他自定义类型（如 oracle）必须填日志目录。",
+		"· 类型kind：覆盖《信创第三方软件拉包打包矩阵》日志型软件——",
+		"  mysql / dm(达梦) / redis / nginx(openresty) / postgres(pg) / kafka /",
+		"  elasticsearch / zookeeper(zk) / tdengine(td2) / tdengine3(td3) / nacos /",
+		"  minio / docker / proxysql / cetus / onlyoffice / tomcat。",
+		"  日志目录留空自动用 oneinstall 标准路径（统一 /egova/log 根）；",
+		"  常见别名（postgresql、pg、es、zk、达梦等）导入时自动归一。",
+		"  无日志面的软件（JDK、nmap、sysbench、NTP、mydumper 等）不需要填进来。",
 		"· 同一类型多台主机：每个主机填一行，工具自动聚合。",
 		"· 日志保留天数：留空=15 天（支持软件默认）；全局设置里的 log_keep_days 只管应用日志。",
 		"· 清理时只会删命中日志模式的文件（*.log/*.err/慢日志/轮转归档等），",
-		"  MySQL 的 binlog、数据文件（ibdata1 等）绝不会被动到。",
+		"  MySQL 的 binlog、数据文件（ibdata1 等）、pg 的 WAL 绝不会被动到。",
 		"",
 		"【工作流】",
 		"1. 填完三个 sheet 后执行：app-updater import -f 本文件.xlsx",
@@ -290,10 +295,14 @@ func writeValidations(f *excelize.File) error {
 	f.AddDataValidation(SheetHosts, dvGroup)
 
 	dvKind := excelize.NewDataValidation(true)
-	dvKind.SetDropList([]string{"mysql", "dm", "redis", "nginx", "tomcat", "oracle", "kafka"})
+	dvKind.SetDropList([]string{
+		"mysql", "dm", "redis", "nginx", "postgres", "kafka", "elasticsearch",
+		"zookeeper", "tdengine", "tdengine3", "nacos", "minio", "docker",
+		"proxysql", "cetus", "onlyoffice", "tomcat",
+	})
 	dvKind.Sqref = "A3:A200"
 	dvKind.SetError(excelize.DataValidationErrorStyleStop, "取值非法",
-		"常用类型：mysql/dm/redis/nginx/tomcat/oracle/kafka；其他类型请填字母数字并补日志目录")
+		"常用类型见下拉（信创矩阵软件）；其他类型请填字母数字并补日志目录")
 	f.AddDataValidation(SheetSupports, dvKind)
 	return nil
 }

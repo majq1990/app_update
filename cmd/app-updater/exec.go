@@ -77,7 +77,7 @@ func gateValidation(cfg *config.Config, yes bool) error {
 // newRunner 构造执行器（含 --pass/--key 环境变量兜底与 dry-run 提示）。
 func newRunner(cfg *config.Config, passFlag, keyFlag string, dryRun, yes bool) *appflow.Runner {
 	over := sshx.Auth{
-		Password: firstStr(passFlag, os.Getenv("APP_UPDATER_SSH_PASS")),
+		Password: sshPassOrDefault(passFlag),
 		KeyPath:  keyFlag,
 	}
 	dry := dryRun || !yes
@@ -196,7 +196,7 @@ func cmdSetupSSH(args []string) error {
 	}
 	fmt.Println("本机密钥对:", privPath, "+", pubPath)
 
-	over := sshx.Auth{Password: firstStr(*pass, os.Getenv("APP_UPDATER_SSH_PASS")), KeyPath: *keyPath}
+	over := sshx.Auth{Password: sshPassOrDefault(*pass), KeyPath: *keyPath}
 	targets := hostsFor(cfg, *appName)
 	if len(targets) == 0 {
 		return fmt.Errorf("没有可处理的主机")

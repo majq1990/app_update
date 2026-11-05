@@ -105,3 +105,92 @@ webs:
 		}
 	}
 }
+
+// 信创矩阵软件清单：别名归一 + 内置目录补齐（覆盖《拉包打包矩阵》日志型软件）。
+func TestNormalizeMatrixKinds(t *testing.T) {
+	c := &Config{}
+	yaml.Unmarshal([]byte(`
+ansible_user: root
+webs:
+  - web: probe
+    middle_type: jar
+    log_dir: logs/
+    master: [{host: 10.0.0.1, web_path: /egova/apps/basic/probe, user: egova, service_port: 10050, start_cmd: "systemctl start probe", stop_cmd: "systemctl stop probe"}]
+supports:
+  - kind: PostgreSQL
+    hosts: [{host: 10.0.0.1}]
+  - kind: kafka
+    hosts: [{host: 10.0.0.1}]
+  - kind: 达梦
+    hosts: [{host: 10.0.0.1}]
+  - kind: ES
+    hosts: [{host: 10.0.0.1}]
+  - kind: zk
+    hosts: [{host: 10.0.0.1}]
+  - kind: td2
+    hosts: [{host: 10.0.0.1}]
+  - kind: td3
+    hosts: [{host: 10.0.0.1}]
+  - kind: openresty
+    hosts: [{host: 10.0.0.1}]
+  - kind: nacos
+    hosts: [{host: 10.0.0.1}]
+  - kind: minio
+    hosts: [{host: 10.0.0.1}]
+  - kind: docker
+    hosts: [{host: 10.0.0.1}]
+  - kind: proxysql
+    hosts: [{host: 10.0.0.1}]
+  - kind: cetus
+    hosts: [{host: 10.0.0.1}]
+  - kind: onlyoffice
+    hosts: [{host: 10.0.0.1}]
+`), c)
+	c.Normalize()
+
+	wants := map[string]string{
+		"PostgreSQL": "postgres",
+		"达梦":          "dm",
+		"ES":          "elasticsearch",
+		"zk":          "zookeeper",
+		"td2":         "tdengine",
+		"td3":         "tdengine3",
+		"openresty":   "nginx",
+	}
+	for orig, want := range wants {
+		if got := NormalizeSupportKind(orig); got != want {
+			t.Errorf("别名归一 %q = %q, want %q", orig, got, want)
+		}
+	}
+	// 归一后目录补齐抽查
+	byKind := map[string]*Support{}
+	for i := range c.Supports {
+		byKind[c.Supports[i].Kind] = &c.Supports[i]
+	}
+	dirWants := map[string]string{
+		"postgres":      "/egova/pgsql/log",
+		"kafka":          "/egova/data/kafka",
+		"elasticsearch":  "/egova/data/elasticsearch/logs",
+		"zookeeper":      "/egova/log/zookeeper",
+		"tdengine":       "/egova/log/TDengine",
+		"tdengine3":      "/egova/log/TDengine3",
+		"nacos":          "/egova/nacos/standalone-logs",
+		"docker":         "/var/lib/docker/containers",
+		"proxysql":       "/egova/log/proxysql",
+		"onlyoffice":     "/var/log/onlyoffice",
+	}
+	for kind, wantDir := range dirWants {
+		s := byKind[kind]
+		if s == nil {
+			t.Errorf("kind %q 归一后丢失", kind)
+			continue
+		}
+		if len(s.LogDirs) == 0 || s.LogDirs[0] != wantDir {
+			t.Errorf("kind %q 日志目录 = %v, want %s", kind, s.LogDirs, wantDir)
+		}
+	}
+	// 全部通过校验（含 shell 安全闸门）
+	if iss := c.Validate(); HasError(iss) {
+		t.Errorf("矩阵配置应通过校验: %v", iss)
+	}
+}
