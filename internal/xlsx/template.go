@@ -1,5 +1,5 @@
 // Package xlsx 负责 Excel 配置模板的生成、导入与反向导出。
-// 工作簿布局：全局设置 / 应用清单 / 主机清单 / 填写说明 四个 sheet。
+// 工作簿布局：全局设置 / 应用清单 / 主机清单 / 支持软件 / 填写说明 五个 sheet。
 package xlsx
 
 import (
@@ -10,10 +10,11 @@ import (
 
 // Sheet 名称常量，导入与导出共用，防止漂移。
 const (
-	SheetGlobal = "全局设置"
-	SheetApps   = "应用清单"
-	SheetHosts  = "主机清单"
-	SheetNotes  = "填写说明"
+	SheetGlobal   = "全局设置"
+	SheetApps     = "应用清单"
+	SheetHosts    = "主机清单"
+	SheetSupports = "支持软件"
+	SheetNotes    = "填写说明"
 )
 
 // 示例行前缀：导入时自动忽略。
@@ -51,12 +52,24 @@ var hostColumns = []struct {
 	{"启动命令", 28}, {"停止命令", 28}, {"文件属主用户", 14}, {"文件属主组", 14}, {"备注", 24},
 }
 
+// supportColumns 支持软件清单的列布局（一台支持软件主机一行；同 kind 多台就多行，
+// 导入时按 kind 聚合到同一 Support 段——与主机清单按应用名关联同构）。
+var supportColumns = []struct {
+	title string
+	width float64
+}{
+	{"类型kind", 14}, {"主机IP", 14}, {"SSH端口", 9}, {"SSH用户", 10},
+	{"名称(可选)", 20}, {"日志目录(可选,逗号分隔)", 40}, {"日志保留天数(可选)", 16},
+	{"清理排除模式(可选,逗号分隔)", 32}, {"备注", 24},
+}
+
 // globalRows 全局设置的键值行。
 var globalRows = []struct{ key, value, desc string }{
 	{"ansible_user", "root", "SSH 登录用户名（主机清单里可按主机覆盖）"},
 	{"ansible_ssh_port", "22", "默认 SSH 端口（主机清单里可按主机覆盖）"},
 	{"ansible_ssh_pass", "", "SSH 密码。强烈建议留空走免密；工具可帮你推送公钥"},
 	{"global_exclude_logs", "*.log,logs/", "全局排除的日志模式，备份/更新时跳过，逗号分隔"},
+	{"log_keep_days", "30", "应用日志保留天数（logs clean 用）；支持软件可在支持软件清单里单独覆盖"},
 	{"tomcat_check_minutes", "20", "tomcat 应用健康检查预算（分钟）；大站 WAR 启动慢可调大，0=默认20"},
 	{"jar_check_minutes", "5", "jar 应用健康检查预算（分钟）；大 jar 启动慢可调大，0=默认5"},
 }
@@ -76,11 +89,11 @@ func BuildTemplate(f *excelize.File) error {
 }
 
 func writeLayout(f *excelize.File) error {
-	// 把默认 Sheet1 改名为全局设置，再建其余三张。
+	// 把默认 Sheet1 改名为全局设置，再建其余四张。
 	if err := f.SetSheetName("Sheet1", SheetGlobal); err != nil {
 		return err
 	}
-	for _, s := range []string{SheetApps, SheetHosts, SheetNotes} {
+	for _, s := range []string{SheetApps, SheetHosts, SheetSupports, SheetNotes} {
 		if _, err := f.NewSheet(s); err != nil {
 			return err
 		}
@@ -147,6 +160,22 @@ func writeLayout(f *excelize.File) error {
 		f.SetColWidth(SheetHosts, col, col, c.width)
 	}
 	freeze(f, SheetHosts, "C3")
+
+	// ---- 支持软件 ----
+	if err := f.MergeCell(SheetSupports, "A1", cellName(len(supportColumns), 1)); err != nil {
+		return err
+	}
+	f.SetCellValue(SheetSupports, "A1", "支持软件清单（数据库/redis/nginx/达梦等一台一行；同类型多台就多行，自动聚合；不填则该类软件不纳入日志运维）")
+	setTitleStyle(f, SheetSupports, len(supportColumns))
+	for i, c := range supportColumns {
+		f.SetCellValue(SheetSupports, cellName(i+1, 2), c.title)
+	}
+	setHeaderStyle(f, SheetSupports, len(supportColumns), 2)
+	for i, c := range supportColumns {
+		col, _ := excelize.ColumnNumberToName(i + 1)
+		f.SetColWidth(SheetSupports, col, col, c.width)
+	}
+	freeze(f, SheetSupports, "C3")
 	return nil
 }
 
@@ -180,6 +209,21 @@ func writeExampleRows(f *excelize.File) error {
 		}
 		setExampleStyle(f, SheetHosts, len(hostColumns), r+3)
 	}
+
+	sups := [][]interface{}{
+		{ExamplePrefix + "mysql", "10.2.0.190", 22, "root", "", "", 15, "",
+			"MySQL：日志目录留空自动用 /egova/apps/mysql/data；binlog 等数据文件清理时自动跳过"},
+		{ExamplePrefix + "redis", "10.2.0.191", 22, "root", "", "", 7, "",
+			"Redis：留空自动用 /egova/apps/redis/log；保留天数可单独覆盖"},
+		{ExamplePrefix + "nginx", "10.2.0.172", 22, "root", "", "/egova/apps/nginx/logs", "", "",
+			"Nginx：显式指定日志目录的写法示例"},
+	}
+	for r, vals := range sups {
+		for c, v := range vals {
+			f.SetCellValue(SheetSupports, cellName(c+1, r+3), v)
+		}
+		setExampleStyle(f, SheetSupports, len(supportColumns), r+3)
+	}
 	return nil
 }
 
@@ -205,6 +249,14 @@ func writeNotes(f *excelize.File) error {
 		"· 健康检查执行位置（health_mode，YAML 字段）：留空/local=工具所在机发起；",
 		"  remote=经 SSH 在目标机本地探测（服务器间端口不通时的推荐做法）；none=显式跳过检查。",
 		"· 文件属主用户/组：更新后执行 chown -R user:group 部署路径。",
+		"",
+		"【支持软件清单】（日志运维：数据库/中间件日志也纳入清理与汇聚）",
+		"· 类型kind：mysql / dm(达梦) / redis / nginx 有内置日志目录约定（一键部署标准路径），",
+		"  日志目录列留空自动采用；其他自定义类型（如 oracle）必须填日志目录。",
+		"· 同一类型多台主机：每个主机填一行，工具自动聚合。",
+		"· 日志保留天数：留空=15 天（支持软件默认）；全局设置里的 log_keep_days 只管应用日志。",
+		"· 清理时只会删命中日志模式的文件（*.log/*.err/慢日志/轮转归档等），",
+		"  MySQL 的 binlog、数据文件（ibdata1 等）绝不会被动到。",
 		"",
 		"【工作流】",
 		"1. 填完三个 sheet 后执行：app-updater import -f 本文件.xlsx",
@@ -236,6 +288,13 @@ func writeValidations(f *excelize.File) error {
 	dvGroup.Sqref = "B3:B500"
 	dvGroup.SetError(excelize.DataValidationErrorStyleStop, "取值非法", "只能是 master / update / static")
 	f.AddDataValidation(SheetHosts, dvGroup)
+
+	dvKind := excelize.NewDataValidation(true)
+	dvKind.SetDropList([]string{"mysql", "dm", "redis", "nginx", "tomcat", "oracle", "kafka"})
+	dvKind.Sqref = "A3:A200"
+	dvKind.SetError(excelize.DataValidationErrorStyleStop, "取值非法",
+		"常用类型：mysql/dm/redis/nginx/tomcat/oracle/kafka；其他类型请填字母数字并补日志目录")
+	f.AddDataValidation(SheetSupports, dvKind)
 	return nil
 }
 

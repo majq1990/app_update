@@ -25,6 +25,11 @@ func Import(path string) (*config.Config, []config.Issue, error) {
 			return nil, nil, fmt.Errorf("缺少工作表 %q: %w", sheet, err)
 		}
 	}
+	// 支持软件 sheet 可选：旧模板（无该 sheet）照常导入，只是无支持软件目标。
+	hasSupports := true
+	if _, err := f.GetSheetIndex(SheetSupports); err != nil {
+		hasSupports = false
+	}
 
 	cfg := &config.Config{}
 	var issues []config.Issue
@@ -45,6 +50,8 @@ func Import(path string) (*config.Config, []config.Issue, error) {
 			cfg.AnsibleSSHPass = val
 		case "global_exclude_logs":
 			cfg.GlobalExcludeLogs = splitList(val)
+		case "log_keep_days":
+			cfg.LogKeepDays = atoiOr(val, 30)
 		case "tomcat_check_minutes":
 			cfg.TomcatCheckMinutes = atoiOr(val, 0)
 		case "jar_check_minutes":
@@ -122,6 +129,61 @@ func Import(path string) (*config.Config, []config.Issue, error) {
 			app.StaticPageGroup = append(app.StaticPageGroup, h)
 		}
 	}
+	// ---- 支持软件清单（可选 sheet；按 kind 聚合多行主机）----
+	if hasSupports {
+		rows, _ = f.GetRows(SheetSupports)
+		idx := map[string]int{} // kind → cfg.Supports 下标
+		for i, row := range rows {
+			if i < 2 || len(row) < 2 {
+				continue
+			}
+			kind := strings.TrimSpace(row[0])
+			if kind == "" || strings.HasPrefix(kind, ExamplePrefix) {
+				continue
+			}
+			where := fmt.Sprintf("%s!第%d行", SheetSupports, i+1)
+			get := func(c int) string {
+				if c < len(row) {
+					return strings.TrimSpace(row[c])
+				}
+				return ""
+			}
+			// 列：A kind B 主机IP C SSH端口 D SSH用户 E 名称 F 日志目录 G 保留天数 H 排除模式 I 备注
+			hostIP := get(1)
+			if hostIP == "" {
+				issues = append(issues, config.Issue{Severity: "error", Where: where, Msg: "主机 IP 为空"})
+				continue
+			}
+			h := config.Host{
+				Host:    hostIP,
+				SSHPort: atoiOr(get(2), 0),
+				SSHUser: get(3),
+			}
+			// 同 kind 的行聚合进同一 Support 段（段级字段取首个非空值）
+			si, ok := idx[kind]
+			if !ok {
+				cfg.Supports = append(cfg.Supports, config.Support{Kind: kind})
+				si = len(cfg.Supports) - 1
+				idx[kind] = si
+			}
+			s := &cfg.Supports[si]
+			if v := get(4); v != "" && s.Name == "" {
+				s.Name = v
+			}
+			if v := get(5); v != "" && len(s.LogDirs) == 0 {
+				s.LogDirs = splitList(v)
+			}
+			if v := get(6); v != "" && s.KeepDays == 0 {
+				s.KeepDays = atoiOr(v, 0)
+			}
+			if v := get(7); v != "" && len(s.ExcludePatterns) == 0 {
+				s.ExcludePatterns = splitList(v)
+			}
+			_ = where
+			s.Hosts = append(s.Hosts, h)
+		}
+	}
+	cfg.Normalize()
 	return cfg, issues, nil
 }
 

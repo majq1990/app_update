@@ -27,6 +27,7 @@ func BuildFromConfig(f *excelize.File, cfg *config.Config) error {
 		"ansible_ssh_port":     ifZero(cfg.AnsibleSSHPort, 22),
 		"ansible_ssh_pass":     cfg.AnsibleSSHPass,
 		"global_exclude_logs":  strings.Join(cfg.GlobalExcludeLogs, ","),
+		"log_keep_days":        ifZero(cfg.LogKeepDays, 30),
 		"tomcat_check_minutes": ifZero(cfg.TomcatCheckMinutes, 20),
 		"jar_check_minutes":    ifZero(cfg.JarCheckMinutes, 5),
 	}
@@ -73,6 +74,27 @@ func BuildFromConfig(f *excelize.File, cfg *config.Config) error {
 				}
 				rn++
 			}
+		}
+	}
+
+	// 支持软件清单：一个主机一行（导入侧按 kind 聚合，往返对称）。
+	// 段级字段（名称/目录/保留天数/排除）在每行都写出（导入取首个非空，往返一致）。
+	rn = 3
+	for _, s := range cfg.Supports {
+		var keep interface{} = ""
+		if s.KeepDays > 0 {
+			keep = s.KeepDays
+		}
+		for _, h := range s.Hosts {
+			vals := []interface{}{
+				s.Kind, h.Host, ifZero(h.SSHPort, ""), h.SSHUser,
+				s.Name, strings.Join(s.LogDirs, ","), keep,
+				strings.Join(s.ExcludePatterns, ","), "",
+			}
+			for c, v := range vals {
+				f.SetCellValue(SheetSupports, cellName(c+1, rn), v)
+			}
+			rn++
 		}
 	}
 	return nil

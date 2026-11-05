@@ -182,3 +182,107 @@ webs:
 		t.Fatalf("旧版配置应通过校验: %+v", iss)
 	}
 }
+
+// 支持软件 sheet 往返：导出 → 导入 → 字段完整还原（含 kind 聚合与段级字段）。
+func TestSupportsRoundTrip(t *testing.T) {
+	want := &config.Config{
+		Global: config.Global{
+			AnsibleUser:       "root",
+			AnsibleSSHPort:    22,
+			GlobalExcludeLogs: []string{"*.log", "logs/"},
+			LogKeepDays:       10,
+		},
+		Webs: []config.App{{
+			Web: "usercenter", MiddleType: "jar", LogDir: "logs/",
+			Master: []config.Host{{
+				Host: "10.2.0.180", ServicePort: 8090, WebPath: "/egova/web/usercenter",
+				StartCmd: "systemctl start usercenter", StopCmd: "systemctl stop usercenter",
+				User: "egova", Group: "egova",
+			}},
+		}},
+		Supports: []config.Support{
+			{
+				Kind: "mysql", KeepDays: 15,
+				Hosts: []config.Host{
+					{Host: "10.2.0.190", SSHPort: 22, SSHUser: "root"},
+					{Host: "10.2.0.191", SSHPort: 22, SSHUser: "root"},
+				},
+			},
+			{
+				Kind: "redis", Name: "Redis缓存", KeepDays: 7,
+				LogDirs:         []string{"/egova/apps/redis/log"},
+				ExcludePatterns: []string{"*.log-*"},
+				Hosts:           []config.Host{{Host: "10.2.0.192"}},
+			},
+			{
+				// 显式目录的自定义类型
+				Kind: "oracle", LogDirs: []string{"/opt/oracle/diag"}, KeepDays: 30,
+				Hosts: []config.Host{{Host: "10.2.0.193"}},
+			},
+		},
+	}
+
+	cfg, issues := saveAndImport(t, func(f *excelize.File) error { return BuildFromConfig(f, want) })
+	if config.HasError(issues) {
+		t.Fatalf("导出导入不应有错误: %+v", issues)
+	}
+
+	if cfg.LogKeepDays != 10 {
+		t.Fatalf("log_keep_days 回环错误: %d", cfg.LogKeepDays)
+	}
+	if len(cfg.Supports) != 3 {
+		t.Fatalf("支持软件段数量不符: %d", len(cfg.Supports))
+	}
+
+	byKind := map[string]*config.Support{}
+	for i := range cfg.Supports {
+		byKind[cfg.Supports[i].Kind] = &cfg.Supports[i]
+	}
+
+	my := byKind["mysql"]
+	if my == nil || len(my.Hosts) != 2 || my.Hosts[1].Host != "10.2.0.191" {
+		t.Fatalf("mysql 聚合错误: %+v", my)
+	}
+	if my.KeepDays != 15 {
+		t.Fatalf("mysql keep_days 回环错误: %d", my.KeepDays)
+	}
+	// Normalize 会给 mysql 补内置目录——往返后应保留（导出时已写出或导入后补齐均算过）
+	if len(my.LogDirs) == 0 || my.LogDirs[0] != "/egova/apps/mysql/data" {
+		t.Fatalf("mysql 日志目录（内置约定补齐）错误: %v", my.LogDirs)
+	}
+
+	rd := byKind["redis"]
+	if rd == nil || rd.Name != "Redis缓存" || rd.KeepDays != 7 {
+		t.Fatalf("redis 段级字段回环错误: %+v", rd)
+	}
+	if len(rd.LogDirs) != 1 || rd.LogDirs[0] != "/egova/apps/redis/log" {
+		t.Fatalf("redis 日志目录回环错误: %v", rd.LogDirs)
+	}
+	if len(rd.ExcludePatterns) != 1 || rd.ExcludePatterns[0] != "*.log-*" {
+		t.Fatalf("redis 排除模式回环错误: %v", rd.ExcludePatterns)
+	}
+
+	or := byKind["oracle"]
+	if or == nil || len(or.LogDirs) != 1 || or.LogDirs[0] != "/opt/oracle/diag" {
+		t.Fatalf("oracle 显式目录回环错误: %+v", or)
+	}
+
+	// 校验含 shell 安全闸门也应通过
+	if iss := cfg.Validate(); config.HasError(iss) {
+		t.Fatalf("回环配置应通过校验: %+v", iss)
+	}
+}
+
+// 模板里的支持软件示例行导入时忽略；全局 log_keep_days 默认 30。
+func TestTemplateSupportsExampleIgnored(t *testing.T) {
+	cfg, issues := saveAndImport(t, BuildTemplate)
+	if config.HasError(issues) {
+		t.Fatalf("模板导入不应有错误: %+v", issues)
+	}
+	if len(cfg.Supports) != 0 {
+		t.Fatalf("支持软件示例行未被忽略: %+v", cfg.Supports)
+	}
+	if cfg.LogKeepDays != 30 {
+		t.Fatalf("log_keep_days 默认值错误: %d", cfg.LogKeepDays)
+	}
+}
