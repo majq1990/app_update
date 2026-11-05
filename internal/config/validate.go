@@ -143,6 +143,9 @@ func (c *Config) Validate() []Issue {
 		}
 	}
 
+	// ---- shell 安全闸门（字段拼进远端命令的注入面；错误级阻止执行）----
+	issues = append(issues, c.ShellSafetyIssues()...)
+
 	// ---- 支持软件（supports）----
 	kindSeen := map[string]string{}
 	for i, s := range c.Supports {

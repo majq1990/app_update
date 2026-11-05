@@ -32,30 +32,42 @@ type sshRunner struct {
 }
 
 func (r sshRunner) ExtractLines(abs string, from, to time.Time) (string, error) {
+	q, err := shellPathArg(abs)
+	if err != nil {
+		return "", err
+	}
 	c, err := r.dial.Dial(r.h)
 	if err != nil {
 		return "", err
 	}
 	script := logs.BuildAwkScript(from, to)
-	out, err := c.Run(fmt.Sprintf("%s %s 2>/dev/null", script, shellQuoteArg(abs)))
+	out, err := c.Run(fmt.Sprintf("%s %s 2>/dev/null", script, q))
 	return out, err
 }
 
 func (r sshRunner) ReadTail(abs string, n int) (string, error) {
+	q, err := shellPathArg(abs)
+	if err != nil {
+		return "", err
+	}
 	c, err := r.dial.Dial(r.h)
 	if err != nil {
 		return "", err
 	}
-	out, err := c.Run(fmt.Sprintf("tail -n %d %s 2>/dev/null", n, shellQuoteArg(abs)))
+	out, err := c.Run(fmt.Sprintf("tail -n %d %s 2>/dev/null", n, q))
 	return out, err
 }
 
 func (r sshRunner) FileSize(abs string) (int64, error) {
+	q, err := shellPathArg(abs)
+	if err != nil {
+		return 0, err
+	}
 	c, err := r.dial.Dial(r.h)
 	if err != nil {
 		return 0, err
 	}
-	out, err := c.Run(fmt.Sprintf("stat -c %%s %s 2>/dev/null || wc -c < %s", shellQuoteArg(abs), shellQuoteArg(abs)))
+	out, err := c.Run(fmt.Sprintf("stat -c %%s %s 2>/dev/null || wc -c < %s", q, q))
 	if err != nil {
 		return 0, err
 	}
@@ -66,6 +78,15 @@ func (r sshRunner) FileSize(abs string) (int64, error) {
 
 func shellQuoteArg(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// shellPathArg 远端路径参数的强校验 + 引用：拒绝任何 shell 元字符后引用。
+// 与 config.ShellSafetyIssues 双保险——CLI 直接传进来的路径（--out 等）不经配置校验。
+func shellPathArg(s string) (string, error) {
+	if strings.ContainsAny(s, "\x00\n\r\t'\"`$;&|<>(){}\\") {
+		return "", fmt.Errorf("路径含 shell 元字符，拒绝执行: %q", s)
+	}
+	return shellQuoteArg(s), nil
 }
 
 // cmdLogsClean logs clean -c config.yaml [--app 名称|all] [--support kind|all]
@@ -281,6 +302,12 @@ func cmdLogsRotateSetup(args []string) error {
 			continue
 		}
 		frag := "/etc/logrotate.d/" + logs.RotateFragmentName(t)
+		if strings.ContainsAny(frag, "'\"`$;&|<>(){} \t\n\r\\") {
+			// RotateFragmentName 已做 sanitize，但名称含空格等仍可能来自配置；
+			// 片段路径要进 shell，这里双保险拒绝。
+			fmt.Printf("❌ %s(%s) 片段名含特殊字符，跳过: %q\n", t.Name, t.Host.Host, frag)
+			continue
+		}
 		body := logs.RotateTemplate(t)
 		j := job{t: t, frag: frag, body: body}
 		if out, err := c.Run("test -e " + shellQuoteArg(frag) + " && cat " + shellQuoteArg(frag)); err == nil && strings.TrimSpace(out) != "" {
