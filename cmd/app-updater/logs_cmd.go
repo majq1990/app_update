@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/majq1990/app-updater-go/internal/appflow"
 	"github.com/majq1990/app-updater-go/internal/config"
 	"github.com/majq1990/app-updater-go/internal/logs"
 	"github.com/majq1990/app-updater-go/internal/sshx"
@@ -152,8 +153,245 @@ func cmdLogsClean(args []string) error {
 	return nil
 }
 
-// cmdLogsGather logs gather -c config.yaml [--app 名称|all] [--support kind|all]
-// [--window 1h|4h|24h] [--out logs-gather]：时间窗过滤拉取 + ERROR 计数。
+// cmdLogsRotate logs rotate check（只读体检）/ setup（推送配置，闸门变更）。
+func cmdLogsRotate(args []string) error {
+	if len(args) == 0 || (args[0] != "check" && args[0] != "setup") {
+		return fmt.Errorf("用法: app-updater logs rotate check|setup -c config.yaml [选项]")
+	}
+	rest := args[1:]
+	if args[0] == "check" {
+		return cmdLogsRotateCheck(rest)
+	}
+	return cmdLogsRotateSetup(rest)
+}
+
+// cmdLogsRotateCheck 只读：全部目标的切割体检报告（高/中/低 分级）。
+func cmdLogsRotateCheck(args []string) error {
+	fs := flag.NewFlagSet("logs rotate check", flag.ExitOnError)
+	cfgPath := fs.String("c", "config.yaml", "配置文件")
+	app := fs.String("app", "all", "应用名（all=全部应用）")
+	support := fs.String("support", "all", "支持软件 kind（all=全部支持软件）")
+	fs.Parse(args)
+
+	cfg, err := config.Load(*cfgPath)
+	if err != nil {
+		return err
+	}
+	if err := gateValidation(cfg, false); err != nil {
+		return err
+	}
+	targets := filterTargets(logs.Targets(cfg), *app, *support)
+	if len(targets) == 0 {
+		fmt.Println("没有匹配的日志目标")
+		return nil
+	}
+	dial := &execDialer{cfg: cfg, over: sshOverride()}
+	defer dial.Close()
+
+	now := time.Now()
+	high, med, low := 0, 0, 0
+	for _, t := range targets {
+		c, err := dial.Dial(t.Host)
+		if err != nil {
+			fmt.Printf("❌ %s(%s) SSH 连接失败: %v\n", t.Name, t.Host.Host, err)
+			continue
+		}
+		var files []logs.LogFile
+		for _, dir := range t.LogDirs {
+			_ = c.Walk(dir, func(e syncx.Entry) error {
+				files = append(files, logs.LogFile{
+					Abs: joinSlash(dir, e.Rel), Dir: dir, Rel: e.Rel,
+					Size: e.Size, Mtime: e.Mtime, IsDir: e.IsDir,
+				})
+				return nil
+			})
+		}
+		res := logs.RunRotateCheck(sshRotater{c}, t, files, logs.RotateCheckOptions{Now: now})
+		if len(res.Findings) == 0 {
+			fmt.Printf("✅ %s(%s) 切割配置正常\n", t.Name, t.Host.Host)
+			continue
+		}
+		fmt.Printf("\n%s(%s):\n", t.Name, t.Host.Host)
+		for _, f := range res.Findings {
+			switch f.Severity {
+			case "high":
+				high++
+				fmt.Println("  [高]", f.Msg)
+			case "medium":
+				med++
+				fmt.Println("  [中]", f.Msg)
+			default:
+				low++
+				fmt.Println("  [低]", f.Msg)
+			}
+		}
+	}
+	fmt.Printf("\n切割体检完成：高 %d / 中 %d / 低 %d\n", high, med, low)
+	return nil
+}
+
+// cmdLogsRotateSetup 变更：生成并推送 /etc/logrotate.d/ 片段。
+// 闸门：dry-run 展示将写入的片段内容与目标清单 → --yes 才推送 → 远端 logrotate -d 语法验证
+// → 不强制轮转（绝不 logrotate -f）。已有片段差异展示提示合并（diff 由人判断）。
+func cmdLogsRotateSetup(args []string) error {
+	fs := flag.NewFlagSet("logs rotate setup", flag.ExitOnError)
+	cfgPath := fs.String("c", "config.yaml", "配置文件")
+	app := fs.String("app", "all", "应用名（all=全部应用）")
+	support := fs.String("support", "all", "支持软件 kind（all=全部支持软件）")
+	dryRun := fs.Bool("dry-run", false, "只展示片段不推送")
+	yes := fs.Bool("yes", false, "确认推送")
+	force := fs.Bool("force", false, "远端已有内容不同的片段时强制覆盖（默认跳过并展示差异）")
+	fs.Parse(args)
+
+	cfg, err := config.Load(*cfgPath)
+	if err != nil {
+		return err
+	}
+	if err := gateValidation(cfg, *yes); err != nil {
+		return err
+	}
+	targets := filterTargets(logs.Targets(cfg), *app, *support)
+	if len(targets) == 0 {
+		fmt.Println("没有匹配的日志目标")
+		return nil
+	}
+	dial := &execDialer{cfg: cfg, over: sshOverride()}
+	defer dial.Close()
+
+	dry := *dryRun || !*yes
+	if !*yes && !*dryRun {
+		fmt.Println("ℹ️ 未加 --yes，本次只展示将生成的 logrotate 配置（dry-run）")
+	}
+
+	// 第一遍：全部生成 + 展示 + 冲突检测
+	type job struct {
+		t      logs.Target
+		frag   string
+		body   string
+		exists string // 远端已有内容（空=不存在）；非空且不同=冲突
+	}
+	var jobs []job
+	for _, t := range targets {
+		if len(t.LogDirs) == 0 {
+			continue // 无日志目录的目标没有可切割对象
+		}
+		c, err := dial.Dial(t.Host)
+		if err != nil {
+			fmt.Printf("❌ %s(%s) SSH 连接失败: %v\n", t.Name, t.Host.Host, err)
+			continue
+		}
+		frag := "/etc/logrotate.d/" + logs.RotateFragmentName(t)
+		body := logs.RotateTemplate(t)
+		j := job{t: t, frag: frag, body: body}
+		if out, err := c.Run("test -e " + shellQuoteArg(frag) + " && cat " + shellQuoteArg(frag)); err == nil && strings.TrimSpace(out) != "" {
+			j.exists = out
+		}
+		jobs = append(jobs, j)
+	}
+	if len(jobs) == 0 {
+		fmt.Println("没有需要生成切割配置的目标")
+		return nil
+	}
+
+	fmt.Printf("将为 %d 个目标生成 logrotate 配置：\n", len(jobs))
+	var conflicts, skips int
+	for _, j := range jobs {
+		fmt.Printf("\n--- %s（%s → %s）---\n%s", j.t.Name, j.t.Host.Host, j.frag, j.body)
+		if j.exists == "" {
+			fmt.Println("  （远端不存在，将新建）")
+			continue
+		}
+		if strings.TrimSpace(j.exists) == strings.TrimSpace(j.body) {
+			fmt.Println("  （远端已有一致配置，跳过）")
+			skips++
+		} else {
+			fmt.Printf("  ⚠️ 远端已有内容不同的配置：\n%s\n  （默认跳过；确认覆盖请加 --force）\n", j.exists)
+			conflicts++
+		}
+	}
+
+	if dry {
+		fmt.Println("\n（dry-run，未推送；确认后加 --yes 执行）")
+		return nil
+	}
+
+	// 第二遍：推送 + 语法验证
+	pushed, skipped, failed := 0, 0, 0
+	for _, j := range jobs {
+		if j.exists != "" {
+			if strings.TrimSpace(j.exists) == strings.TrimSpace(j.body) {
+				skipped++
+				continue
+			}
+			if !*force {
+				skipped++
+				continue
+			}
+		}
+		c, err := dial.Dial(j.t.Host)
+		if err != nil {
+			failed++
+			continue
+		}
+		// 写远端：先传临时名再 mv 原子替换（部署运行中文件的安全惯例）
+		tmp := j.frag + ".eops-new"
+		if err := uploadString(c, tmp, j.body); err != nil {
+			fmt.Printf("❌ %s 上传 %s 失败: %v\n", j.t.Host.Host, tmp, err)
+			failed++
+			continue
+		}
+		if out, err := c.Run(fmt.Sprintf("mv -f %s %s && logrotate -d %s 2>&1", shellQuoteArg(tmp), shellQuoteArg(j.frag), shellQuoteArg(j.frag))); err != nil || strings.Contains(strings.ToLower(out), "error") {
+			fmt.Printf("❌ %s %s 语法验证未过:\n%s\n", j.t.Host.Host, j.frag, out)
+			_, _ = c.Run("mv -f " + shellQuoteArg(j.frag) + " " + shellQuoteArg(j.frag+".broken")) // 保留坏配置现场但不让它生效
+			failed++
+			continue
+		}
+		fmt.Printf("✅ %s(%s) 已推送 %s（语法验证通过，未强制轮转）\n", j.t.Name, j.t.Host.Host, j.frag)
+		pushed++
+	}
+	fmt.Printf("\n推送完成：成功 %d / 跳过 %d / 失败 %d\n", pushed, skipped, failed)
+	if failed > 0 {
+		return fmt.Errorf("%d 个目标推送失败", failed)
+	}
+	return nil
+}
+
+// sshRotater 适配 logs.Rotater：appflow.Conn 的动态类型是 *sshx.Client
+// （execDialer.Dial 返回），TestPath/ReadFile 在其上；用接口断言取。
+type sshRotater struct{ c appflow.Conn }
+
+func (r sshRotater) TestFile(p string) bool {
+	if sc, ok := r.c.(interface{ TestPath(string) bool }); ok {
+		return sc.TestPath(p)
+	}
+	return false
+}
+func (r sshRotater) ReadFile(p string) (string, error) {
+	if sc, ok := r.c.(interface {
+		ReadFile(string) ([]byte, error)
+	}); ok {
+		b, err := sc.ReadFile(p)
+		return string(b), err
+	}
+	return "", fmt.Errorf("连接对象不支持 ReadFile")
+}
+func (r sshRotater) Run(cmd string) (string, error) { return r.c.Run(cmd) }
+
+// uploadString 小文本上传（logrotate 片段）：本地临时文件 + SFTP 上传到 .eops-new。
+func uploadString(c appflow.Conn, remotePath, content string) error {
+	local, err := os.CreateTemp("", "eops-rotate-*.conf")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(local.Name())
+	if _, err := local.WriteString(content); err != nil {
+		local.Close()
+		return err
+	}
+	local.Close()
+	// 复用 syncx 上传语义：传到远端后保留 mtime 即可（权限 mv 后 root 默认）
+	return c.Upload(local.Name(), remotePath, time.Now())
+}
 func cmdLogsGather(args []string) error {
 	fs := flag.NewFlagSet("logs gather", flag.ExitOnError)
 	cfgPath := fs.String("c", "config.yaml", "配置文件")

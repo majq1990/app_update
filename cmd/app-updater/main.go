@@ -56,6 +56,11 @@ const usage = `app-updater — Java 应用更新工具 (Go 版)
   app-updater logs gather -c config.yaml [--app 名称|all] [--support kind|all] [--window 4h] [--out 目录]
       拉取时间窗内的日志段到本地（远端 awk 过滤，只传命中行；catalina.out 走末尾 tail），
       并统计 ERROR/Exception 计数
+  app-updater logs rotate check -c config.yaml [--app 名称|all] [--support kind|all]
+      切割体检（只读）：logrotate 配置存在性/语法/覆盖漂移 + 未切割大文件 + 增长率预警
+  app-updater logs rotate setup -c config.yaml [--app 名称|all] [--support kind|all] [--dry-run] [--yes] [--force]
+      生成并推送 /etc/logrotate.d/ 片段（copytruncate 适配；推送后 logrotate -d 语法验证，
+      绝不强制轮转；远端已有不同配置默认跳过，--force 才覆盖）
   app-updater version                          查看版本
 `
 
@@ -98,17 +103,24 @@ func main() {
 	case "compress-backups":
 		err = cmdCompressBackups(os.Args[2:])
 	case "logs":
-		if len(os.Args) > 2 && (os.Args[2] == "clean" || os.Args[2] == "gather") {
-			if created := ensureWorkspace(); len(created) > 0 {
-				fmt.Printf("已初始化工作目录: %s\n", strings.Join(created, "/ "))
-			}
-			if os.Args[2] == "clean" {
-				err = cmdLogsClean(os.Args[3:])
+		if len(os.Args) > 2 {
+			sub := os.Args[2]
+			if sub == "clean" || sub == "gather" {
+				if created := ensureWorkspace(); len(created) > 0 {
+					fmt.Printf("已初始化工作目录: %s\n", strings.Join(created, "/ "))
+				}
+				if sub == "clean" {
+					err = cmdLogsClean(os.Args[3:])
+				} else {
+					err = cmdLogsGather(os.Args[3:])
+				}
+			} else if sub == "rotate" {
+				err = cmdLogsRotate(os.Args[3:])
 			} else {
-				err = cmdLogsGather(os.Args[3:])
+				err = fmt.Errorf("用法: app-updater logs clean|gather|rotate ... -c config.yaml（详见 app-updater 帮助）")
 			}
 		} else {
-			err = fmt.Errorf("用法: app-updater logs clean|gather -c config.yaml [选项]（详见 app-updater 帮助）")
+			err = fmt.Errorf("用法: app-updater logs clean|gather|rotate ... -c config.yaml（详见 app-updater 帮助）")
 		}
 	case "version", "-v", "--version":
 		fmt.Println(versionString())

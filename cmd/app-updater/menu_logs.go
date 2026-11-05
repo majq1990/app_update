@@ -19,13 +19,19 @@ func menuLogs() {
 --- 日志运维（当前配置: %s）---
 1. 汇聚日志（时间窗拉取 + ERROR 统计）
 2. 清理过期日志（应用 + 支持软件 mysql·redis·nginx·达梦）
+3. 切割体检（logrotate 配置/大文件/增长率，只读）
+4. 切割配置下发（生成并推送 logrotate 片段，先预览）
 0. 返回主菜单
 `, curCfgPath)
-		switch getIntChoice("请选择", 0, 2) {
+		switch getIntChoice("请选择", 0, 4) {
 		case 1:
 			menuLogsGather()
 		case 2:
 			menuLogsClean()
+		case 3:
+			menuLogsRotateCheck()
+		case 4:
+			menuLogsRotateSetup()
 		case 0:
 			return
 		}
@@ -90,4 +96,41 @@ func menuLogsClean() {
 func readLine(sc *bufio.Reader) string {
 	line, _ := sc.ReadString('\n')
 	return strings.TrimRight(line, "\r\n")
+}
+
+func menuLogsRotateCheck() {
+	if _, ok := checkConfigForMenu(); !ok {
+		return
+	}
+	sc := bufio.NewReader(os.Stdin)
+	fmt.Print("应用名（回车=全部应用）: ")
+	app := strings.TrimSpace(readLine(sc))
+	if app == "" {
+		app = "all"
+	}
+	fmt.Print("支持软件 kind（回车=全部）: ")
+	sup := strings.TrimSpace(readLine(sc))
+	if sup == "" {
+		sup = "all"
+	}
+	_ = cmdLogsRotate([]string{"check", "-c", curCfgPath, "--app", app, "--support", sup})
+}
+
+func menuLogsRotateSetup() {
+	if _, ok := checkConfigForMenu(); !ok {
+		return
+	}
+	sc := bufio.NewReader(os.Stdin)
+	fmt.Print("应用名（回车=全部应用）: ")
+	app := strings.TrimSpace(readLine(sc))
+	if app == "" {
+		app = "all"
+	}
+	fmt.Print("支持软件 kind（回车=全部）: ")
+	sup := strings.TrimSpace(readLine(sc))
+	if sup == "" {
+		sup = "all"
+	}
+	fmt.Println("\n（先预览将生成的 logrotate 配置；确认后需加 --yes 才真正推送）")
+	_ = cmdLogsRotate([]string{"setup", "-c", curCfgPath, "--app", app, "--support", sup})
 }
