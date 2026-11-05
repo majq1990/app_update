@@ -10,6 +10,10 @@ type Global struct {
 	AnsibleUser         string   `yaml:"ansible_user"`
 	IsCheckedSuccessful bool     `yaml:"is_checked_successful,omitempty"`
 	GlobalExcludeLogs   []string `yaml:"global_exclude_logs,omitempty"`
+	// LogKeepDays 应用日志默认保留天数（logs clean 用）。0 = 30。
+	LogKeepDays int `yaml:"log_keep_days,omitempty"`
+	// GlobalExcludeLogs 之外，logs clean 对支持软件（supports）日志同样适用的全局排除。
+	// 缺省为空：支持软件目录本来只放日志，不需要应用目录那套排除。
 	// TomcatCheckMinutes tomcat 应用健康检查预算（分钟）。0 = 默认 20。
 	// 大站 WAR 从端口监听到 HTTP 就绪可能要几分钟（usercenter 这类大 jar 同理，见 JarCheckMinutes）。
 	TomcatCheckMinutes int `yaml:"tomcat_check_minutes,omitempty"`
@@ -80,8 +84,38 @@ type App struct {
 
 // Config 顶层配置。
 type Config struct {
-	Global `yaml:",inline"` // yaml.v3 需显式声明内联，否则全局字段不会被解析
-	Webs   []App            `yaml:"webs"`
+	Global  `yaml:",inline"` // yaml.v3 需显式声明内联，否则全局字段不会被解析
+	Webs    []App            `yaml:"webs"`
+	Supports []Support       `yaml:"supports,omitempty"` // 支持软件（数据库/redis/nginx 等）日志与运维目标
+}
+
+// Support 一类支持软件的运维目标。Kind 决定日志目录的默认约定：
+//   - mysql:   datadir（默认 /egova/apps/mysql/data）下 *.err|slow.log|binlog
+//   - dm/达梦:  安装目录 log 子目录（默认 /egova/apps/dm/log）
+//   - redis:   logfile（默认 /egova/apps/redis/log/redis.log）
+//   - nginx:   access/error log（默认 /egova/apps/nginx/logs）
+//   - tomcat:  独立 tomcat（不属于任何 webs 应用）的 logs 目录
+// Hosts 复用应用主机的 SSH 语义（ssh_port/ssh_user/ssh_pass 可按主机覆盖）。
+type Support struct {
+	Kind    string   `yaml:"kind"`              // mysql | dm | redis | nginx | tomcat（自定义字符串亦允许，配了 LogDirs 即生效）
+	Name    string   `yaml:"name,omitempty"`    // 可读名称；缺省用 Kind
+	LogDirs []string `yaml:"log_dirs,omitempty"` // 日志目录；缺省按 Kind 内置约定补齐（Normalize）
+	KeepDays int     `yaml:"keep_days,omitempty"` // 日志保留天数；0 = 回落 LogKeepDays（SupportsLog 默认 15）
+	ExcludePatterns []string `yaml:"exclude_patterns,omitempty"` // 清理时额外排除（如 binlog 需要保留的场景）
+	Hosts   []Host   `yaml:"hosts"`
+}
+
+// SupportsLogKeepDays 支持软件日志的默认保留天数（应用日志默认走 Global.LogKeepDays）。
+const SupportsLogKeepDays = 15
+
+// SupportByKind 按类型查找第一个匹配的支持软件配置段。
+func (c *Config) SupportByKind(kind string) *Support {
+	for i := range c.Supports {
+		if c.Supports[i].Kind == kind {
+			return &c.Supports[i]
+		}
+	}
+	return nil
 }
 
 // 群组名称常量。

@@ -51,6 +51,11 @@ const usage = `app-updater — Java 应用更新工具 (Go 版)
       清理 update/ 下的历史更新包（交互菜单：配置管理 11）
   app-updater compress-backups [--dir backups] [--workers N] [--dry-run] [--yes]
       对未压缩的备份版本目录做多线程 tar.gz 压缩（交互菜单：配置管理 12）
+  app-updater logs clean -c config.yaml [--app 名称|all] [--support kind|all] [--dry-run] [--yes]
+      清理过期日志（应用 log_dir + supports 支持软件目录；白名单命中才删，dry-run 默认）
+  app-updater logs gather -c config.yaml [--app 名称|all] [--support kind|all] [--window 4h] [--out 目录]
+      拉取时间窗内的日志段到本地（远端 awk 过滤，只传命中行；catalina.out 走末尾 tail），
+      并统计 ERROR/Exception 计数
   app-updater version                          查看版本
 `
 
@@ -92,6 +97,19 @@ func main() {
 		err = cmdCleanUpdate(os.Args[2:])
 	case "compress-backups":
 		err = cmdCompressBackups(os.Args[2:])
+	case "logs":
+		if len(os.Args) > 2 && (os.Args[2] == "clean" || os.Args[2] == "gather") {
+			if created := ensureWorkspace(); len(created) > 0 {
+				fmt.Printf("已初始化工作目录: %s\n", strings.Join(created, "/ "))
+			}
+			if os.Args[2] == "clean" {
+				err = cmdLogsClean(os.Args[3:])
+			} else {
+				err = cmdLogsGather(os.Args[3:])
+			}
+		} else {
+			err = fmt.Errorf("用法: app-updater logs clean|gather -c config.yaml [选项]（详见 app-updater 帮助）")
+		}
 	case "version", "-v", "--version":
 		fmt.Println(versionString())
 	case "help", "-h", "--help":

@@ -142,6 +142,48 @@ func (c *Config) Validate() []Issue {
 			}
 		}
 	}
+
+	// ---- 支持软件（supports）----
+	kindSeen := map[string]string{}
+	for i, s := range c.Supports {
+		w := fmt.Sprintf("支持软件>%d", i+1)
+		if strings.TrimSpace(s.Kind) == "" {
+			issues = append(issues, Issue{"error", w, "kind 为空"})
+			continue
+		}
+		if prev, dup := kindSeen[s.Kind]; dup {
+			issues = append(issues, Issue{"error", w,
+				fmt.Sprintf("kind %q 与第 %s 个支持软件重复，请合并 hosts", s.Kind, prev)})
+		}
+		kindSeen[s.Kind] = fmt.Sprint(i + 1)
+		if len(s.Hosts) == 0 {
+			issues = append(issues, Issue{"error", w, "hosts 为空"})
+		}
+		for _, d := range s.LogDirs {
+			if strings.TrimSpace(d) == "" {
+				issues = append(issues, Issue{"error", w, "log_dirs 含空项"})
+			} else if !strings.HasPrefix(d, "/") {
+				issues = append(issues, Issue{"error", w,
+					fmt.Sprintf("log_dirs 必须是绝对路径: %q", d)})
+			}
+		}
+		if _, known := defaultSupportLogDirs[s.Kind]; len(s.LogDirs) == 0 && !known {
+			issues = append(issues, Issue{"error", w,
+				fmt.Sprintf("kind %q 无内置日志目录约定，必须显式配置 log_dirs", s.Kind)})
+		}
+		for j, h := range s.Hosts {
+			// 支持软件主机只需基础校验（端口/URI/启停命令不适用；属主不涉及文件推送）
+			loc := w + ">" + fmt.Sprint(j+1)
+			if strings.TrimSpace(h.Host) == "" {
+				issues = append(issues, Issue{"error", loc, "主机 IP 为空"})
+				continue
+			}
+			if h.SSHPort != 0 && (h.SSHPort < 1 || h.SSHPort > 65535) {
+				issues = append(issues, Issue{"error", loc,
+					fmt.Sprintf("SSH 端口非法: %d", h.SSHPort)})
+			}
+		}
+	}
 	return issues
 }
 

@@ -31,10 +31,37 @@ func (c *Config) Save(path string) error {
 	return os.WriteFile(path, data, 0o644)
 }
 
+// defaultSupportLogDirs 支持软件按 Kind 的日志目录内置约定（一键部署标准路径）。
+// 现场偏离时在 supports 段显式配置 log_dirs 覆盖。
+var defaultSupportLogDirs = map[string][]string{
+	"mysql": {"/egova/apps/mysql/data"},
+	"dm":    {"/egova/apps/dm/log"},
+	"redis": {"/egova/apps/redis/log"},
+	"nginx": {"/egova/apps/nginx/logs"},
+}
+
 // Normalize 填补缺省值。
 func (c *Config) Normalize() {
 	if c.AnsibleSSHPort == 0 {
 		c.AnsibleSSHPort = 22
+	}
+	if c.LogKeepDays == 0 {
+		c.LogKeepDays = 30
+	}
+	// 支持软件段：名称缺省取 Kind；日志目录缺省按 Kind 内置约定补齐。
+	for i := range c.Supports {
+		s := &c.Supports[i]
+		if s.Name == "" {
+			s.Name = s.Kind
+		}
+		if len(s.LogDirs) == 0 {
+			if dirs, ok := defaultSupportLogDirs[s.Kind]; ok {
+				s.LogDirs = dirs
+			}
+		}
+		if s.KeepDays == 0 {
+			s.KeepDays = SupportsLogKeepDays
+		}
 	}
 	// 标准健康检查地址自动补齐：历史配置里 jar 应用 check_uri 为空时，
 	// 按《服务健康检查地址标准》补齐 backend 探针路径（显式清空想走 TCP 的，

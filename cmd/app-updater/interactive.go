@@ -85,9 +85,10 @@ func runInteractive() {
 2. 应用回滚
 3. 配置管理（识别一键 / 表格导入 / 导出当前配置）
 4. 免密初始化
+5. 日志运维（汇聚 / 清理，含支持软件 mysql·redis·nginx·达梦）
 0. 退出
 `, versionString(), curCfgPath)
-		switch getIntChoice("请选择", 0, 4) {
+		switch getIntChoice("请选择", 0, 5) {
 		case 1:
 			menuUpdate()
 		case 2:
@@ -96,6 +97,8 @@ func runInteractive() {
 			menuConfig()
 		case 4:
 			menuSetupSSH()
+		case 5:
+			menuLogs()
 		case 0:
 			fmt.Println("再见。")
 			return

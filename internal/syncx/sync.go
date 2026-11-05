@@ -367,6 +367,11 @@ func joinAbs(base, rel string) string {
 //	p 含 "/"（锚定）       → 匹配相对路径 == p、p 子树，或 path.Match 通配
 //	支持 glob：* ? [a-z]
 func excludedRel(rel string, isDir bool, patterns []string) bool {
+	return MatchPatterns(rel, isDir, patterns)
+}
+
+// MatchPatterns rsync 风格模式匹配（导出供 logs clean 复用，语义与 Excludes 一致）。
+func MatchPatterns(rel string, isDir bool, patterns []string) bool {
 	parts := strings.Split(strings.Trim(rel, "/"), "/")
 	for i := 1; i < len(parts); i++ { // 祖先目录命中目录模式 → 子树整体排除
 		anc := strings.Join(parts[:i], "/")
