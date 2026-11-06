@@ -170,6 +170,17 @@ func (c *Config) Validate() []Issue {
 					fmt.Sprintf("log_dirs 必须是绝对路径: %q", d)})
 			}
 		}
+		for _, d := range s.BackupPaths {
+			if strings.TrimSpace(d) == "" {
+				issues = append(issues, Issue{"error", w, "backup_paths 含空项"})
+			} else if !strings.HasPrefix(d, "/") {
+				issues = append(issues, Issue{"error", w,
+					fmt.Sprintf("backup_paths 必须是绝对路径: %q", d)})
+			} else if !pathSafe(d) {
+				issues = append(issues, Issue{"error", w,
+					fmt.Sprintf("backup_paths 含非法字符: %q", d)})
+			}
+		}
 		if _, known := defaultSupportLogDirs[s.Kind]; len(s.LogDirs) == 0 && !known {
 			issues = append(issues, Issue{"error", w,
 				fmt.Sprintf("kind %q 无内置日志目录约定，必须显式配置 log_dirs", s.Kind)})
@@ -185,6 +196,143 @@ func (c *Config) Validate() []Issue {
 				issues = append(issues, Issue{"error", loc,
 					fmt.Sprintf("SSH 端口非法: %d", h.SSHPort)})
 			}
+		}
+	}
+
+	// ---- 备份运维（backup）----
+	issues = append(issues, c.validateBackup()...)
+
+	// ---- 监控运维（monitor）----
+	issues = append(issues, c.validateMonitor()...)
+	return issues
+}
+
+// hostnameSafe 主机名/IP 白名单（会进远端 TCP 探测命令）。
+func hostnameSafe(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '.' || r == '-' || r == '_':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// validateMonitor 监控段校验：端口范围、路径形态、云中心地址白名单。
+func (c *Config) validateMonitor() []Issue {
+	m := c.Monitor
+	if m == nil {
+		return nil
+	}
+	const w = "监控设置"
+	var issues []Issue
+	if s := strings.TrimSpace(m.Server); s != "" && !hostnameSafe(s) {
+		issues = append(issues, Issue{"error", w, fmt.Sprintf("server 非法: %q（只允许字母数字.-_）", s)})
+	}
+	for name, v := range map[string]int{
+		"server_port": m.ServerPort, "agent_port": m.AgentPort,
+		"proxy_port": m.ProxyPort, "yum_port": m.YumPort,
+	} {
+		if v != 0 && (v < 1 || v > 65535) {
+			issues = append(issues, Issue{"error", w, fmt.Sprintf("%s 非法: %d", name, v)})
+		}
+	}
+	for name, p := range map[string]string{
+		"agent_conf": m.AgentConf, "proxy_conf": m.ProxyConf,
+		"plugin_dir": m.PluginDir, "script_dir": m.ScriptDir, "psk_file": m.PSKFile,
+	} {
+		if p == "" {
+			continue
+		}
+		if !strings.HasPrefix(p, "/") || !pathSafe(p) {
+			issues = append(issues, Issue{"error", w, fmt.Sprintf("%s 必须是不含特殊字符的绝对路径: %q", name, p)})
+		}
+	}
+	for _, h := range append(append([]Host{}, m.ProxyHosts...), m.AgentHosts...) {
+		if strings.TrimSpace(h.Host) == "" {
+			issues = append(issues, Issue{"error", w, "hosts 含空主机"})
+		}
+	}
+	return issues
+}
+
+// sqlNameSafe 数据库名白名单：字母数字 _ $ . -（会进 mysqldump 命令行）。
+func sqlNameSafe(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '_' || r == '$' || r == '.' || r == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// validateBackup 备份段校验：路径/库名/凭据文件都按「会进远端命令」的严格口径。
+func (c *Config) validateBackup() []Issue {
+	b := c.Backup
+	if b == nil {
+		return nil
+	}
+	const w = "备份设置"
+	var issues []Issue
+	if root := strings.TrimSpace(b.Root); root != "" {
+		if !strings.HasPrefix(root, "/") {
+			issues = append(issues, Issue{"error", w, fmt.Sprintf("root 必须是绝对路径: %q", root)})
+		} else if !pathSafe(root) {
+			issues = append(issues, Issue{"error", w, fmt.Sprintf("root 含非法字符: %q", root)})
+		}
+	}
+	if b.KeepDays < 0 {
+		issues = append(issues, Issue{"error", w, fmt.Sprintf("keep_days 不能为负: %d", b.KeepDays)})
+	}
+	for _, db := range b.Databases {
+		if !sqlNameSafe(db) {
+			issues = append(issues, Issue{"error", w,
+				fmt.Sprintf("databases 含非法库名: %q（只允许字母数字_$.-）", db)})
+		}
+	}
+	if u := strings.TrimSpace(b.DumpUser); u != "" && !sqlNameSafe(u) {
+		issues = append(issues, Issue{"error", w, fmt.Sprintf("dump_user 非法: %q", u)})
+	}
+	if f := strings.TrimSpace(b.DumpDefaultsFile); f != "" {
+		if !strings.HasPrefix(f, "/") || !pathSafe(f) {
+			issues = append(issues, Issue{"error", w,
+				fmt.Sprintf("dump_defaults_file 必须是不含特殊字符的绝对路径: %q", f)})
+		}
+	}
+	for _, ex := range b.Exclude {
+		if strings.TrimSpace(ex) == "" {
+			issues = append(issues, Issue{"error", w, "exclude 含空项"})
+		} else if strings.ContainsAny(ex, "'\"`$;&|<>(){}\\") {
+			issues = append(issues, Issue{"error", w,
+				fmt.Sprintf("exclude 含 shell 元字符: %q", ex)})
+		} else if strings.HasPrefix(ex, "/") {
+			issues = append(issues, Issue{"warn", w,
+				fmt.Sprintf("exclude 应为相对应用根的路径: %q", ex)})
+		}
+	}
+	// 配了数据库备份但没有 mysql 支持软件段 = 无处执行 mysqldump
+	if len(b.Databases) > 0 {
+		found := false
+		for _, s := range c.Supports {
+			if s.Kind == "mysql" && len(s.Hosts) > 0 {
+				found = true
+				break
+			}
+		}
+		if !found {
+			issues = append(issues, Issue{"error", w,
+				"backup.databases 非空但没有 mysql 类型的 supports 段（mysqldump 无目标主机）"})
 		}
 	}
 	return issues
