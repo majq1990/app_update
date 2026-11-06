@@ -43,11 +43,73 @@ mv eops-linux-amd64 eops
 ./eops backup run -c config.yaml --yes                       # 现场备份（产物留现场）
 ./eops backup verify -c config.yaml                          # 完整性校验
 ./eops backup report -c config.yaml --out 台账.json --verify  # 台账导出
+./eops backup restore -c config.yaml --app usercenter \
+    --file /egova/backup/20261107/eops-usercenter-172.21.133.222-103000.tar.gz   # 恢复计划（dry-run）
+./eops backup restore -c config.yaml --app usercenter --file <同上> --yes        # 正式恢复
+./eops backup push -c config.yaml --out payload.json         # 生成 ztoa 备份中间表 payload（不联网）
 ./eops inspect run -c config.yaml --json 巡检.json            # 巡检（只读）
 ./eops inspect security -c config.yaml                        # 只看安全
 ./eops monitor doctor -c config.yaml                          # 监控诊断
 ./eops harden check -c config.yaml                            # 加固清单（只读）
 ```
+
+## 交互菜单
+
+不带参数运行 `./eops` 进入交互模式，主菜单按能力域分三组（分组标题仅用于展示，编号即输入选择）：
+
+```
+============================================
+  eops 统一运维工具 · 交互模式
+  <版本行>
+  当前配置: config.yaml
+============================================
+—— 项目交付 ——
+1. 应用更新
+2. 应用回滚
+3. 备份运维（执行 / 清单 / 校验 / 清理 / 台账）
+—— 日常运维 ——
+4. 日志运维（汇聚 / 清理 / 切割）
+5. 项目巡检（OS / 安全 / 中间件）
+6. 监控运维（诊断 / 白名单修复 / 部署清单）
+7. 安全加固（只读清单 / 建议片段 / 台账）
+—— 配置与接入 ——
+8. 配置管理（识别一键 / 表格导入 / 导出）
+9. 免密初始化
+0. 退出
+```
+
+`3 备份运维` 子菜单：执行备份 / 清单 / 校验 / 清理 / 台账 / **从备份恢复应用** / **生成 ztoa 备份中间表 payload**。
+
+## 备份恢复与台账推送
+
+### backup restore（从现场备份包恢复应用）
+
+```bash
+./eops backup restore -c config.yaml --app usercenter \
+    --file /egova/backup/20261107/eops-usercenter-172.21.133.222-103000.tar.gz          # dry-run，打印完整计划
+./eops backup restore -c config.yaml --app usercenter --file <同上> --yes             # 正式执行
+```
+
+- 备份包必须位于 `backup.root` 下、且为本工具产物 `eops-*.tar.gz`（前缀 + 路径白名单双重校验）；
+- 包名中的「应用-主机」必须与 `webs` 中的目标主机匹配，避免错配恢复；
+- 执行序列：停应用 → **变更前自动备份** 当前 `web_path` 到 `<root>/pre-restore-<ts>.tar.gz` → `tar -xzf` 覆盖解压 →
+  `chown -R user:group` → 启应用 → 健康检查（有 `check_uri` 走 curl，否则远端 `/dev/tcp` 探端口；
+  jar/tomcat 分别按 `jar_check_minutes` / `tomcat_check_minutes` 预算）；
+- 覆盖式恢复，**不删除运行期新增文件**（日志天然保留）；任一步骤失败即停，并列出已执行步骤。
+
+### backup push（生成 ztoa 项目备份中间表 payload）
+
+```bash
+./eops backup push -c config.yaml                          # 输出 payload JSON 到 stdout
+./eops backup push -c config.yaml --out payload.json       # 落盘
+./eops backup push -c config.yaml --verify --out payload.json          # 同时校验每份备份
+./eops backup push -c config.yaml --project 某项目 --region 某大区 ...  # 附带台账外的项目元数据
+```
+
+- 读现场台账，按 `kind=app` / `kind=mysql` 分别取最新备份时间，算出「最新上传日期（YYYY-MM-DD）」与「上传间隔（天）」；
+- 输出为明道云写行格式 `{"controls":[{"controlId":"...","value":"..."}]}`，控件 id 对应 worksheet 项目备份中间表；
+  项目经理 / 省份工程总 / 大区工程总 / 交付项目等成员与关联字段默认留空，由人工或上层补齐；
+- **工具不联网**：只产出 JSON，真实写表由上层用 ztoa MCP 执行。
 
 ## 配置
 
