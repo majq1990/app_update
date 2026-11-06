@@ -21,9 +21,10 @@ func menuBackup() {
 4. 清理过期备份（保留期，先列出）
 5. 导出台账 JSON（可带校验）
 6. 从备份恢复应用（停应用→自动备份→解压→属主→启动→健康检查）
+7. 生成 ztoa 项目备份中间表 payload（只读台账，不联网）
 0. 返回主菜单
 `, curCfgPath)
-		switch getIntChoice("请选择", 0, 6) {
+		switch getIntChoice("请选择", 0, 7) {
 		case 1:
 			menuBackupRun()
 		case 2:
@@ -36,6 +37,8 @@ func menuBackup() {
 			menuBackupReport()
 		case 6:
 			menuBackupRestore()
+		case 7:
+			menuBackupPush()
 		case 0:
 			return
 		}
@@ -170,6 +173,32 @@ func menuBackupRestore() {
 	}
 	args = append(args, "--yes")
 	if err := cmdBackupRestore(args); err != nil {
+		fmt.Println("❌", err)
+	}
+}
+
+func menuBackupPush() {
+	if _, ok := checkConfigForMenu(); !ok {
+		return
+	}
+	sc := bufio.NewReader(os.Stdin)
+	fmt.Print("应用名（回车=全部应用）: ")
+	app := strings.TrimSpace(readLine(sc))
+	if app == "" {
+		app = "all"
+	}
+	fmt.Print("输出文件（回车=tool-ztoa-backup-payload.json）: ")
+	out := strings.TrimSpace(readLine(sc))
+	if out == "" {
+		out = "tool-ztoa-backup-payload.json"
+	}
+	fmt.Print("是否同时校验每份备份？(y/N): ")
+	verify := strings.ToLower(strings.TrimSpace(readLine(sc)))
+	args := []string{"-c", curCfgPath, "--app", app, "--out", out}
+	if verify == "y" || verify == "yes" {
+		args = append(args, "--verify")
+	}
+	if err := cmdBackupPush(args); err != nil {
 		fmt.Println("❌", err)
 	}
 }

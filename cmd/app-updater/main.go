@@ -74,6 +74,9 @@ const usage = `eops — 统一运维工具（应用更新/回滚 · 日志 · �
   eops backup restore -c config.yaml --app 应用名 --file 备份包.tar.gz [--dry-run] [--yes]
       从现场 eops-*.tar.gz 恢复应用：停应用→变更前自动备份→解压→属主→启动→健康检查
       （默认 dry-run 打印完整计划；备份包必须位于 backup.root 下）
+  eops backup push -c config.yaml [--verify] [--out payload.json]
+      读现场台账生成 ztoa「项目备份中间表」行 payload（应用/数据库备份最新日期与间隔）；
+      本命令不联网，真实写表由上层用 ztoa MCP 执行
   eops inspect run -c config.yaml [--dim os,security,middleware] [--host IP|all]
       [--json 报告.json] [--parallel 4] [--fail-on warn|error|critical|none]
       项目巡检：SSH 直连执行只读检查（OS/安全/中间件），终端摘要 + 可选 JSON 报告

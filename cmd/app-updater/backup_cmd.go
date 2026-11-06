@@ -19,7 +19,7 @@ import (
 
 func cmdBackup(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("用法: eops backup run|list|verify|prune|clean|report -c config.yaml [选项]")
+		return fmt.Errorf("用法: eops backup run|list|verify|prune|clean|report|restore|push -c config.yaml [选项]")
 	}
 	switch args[0] {
 	case "run":
@@ -34,8 +34,10 @@ func cmdBackup(args []string) error {
 		return cmdBackupReport(args[1:])
 	case "restore":
 		return cmdBackupRestore(args[1:])
+	case "push":
+		return cmdBackupPush(args[1:])
 	default:
-		return fmt.Errorf("未知 backup 子命令: %s（可用 run|list|verify|prune|clean|report|restore）", args[0])
+		return fmt.Errorf("未知 backup 子命令: %s（可用 run|list|verify|prune|clean|report|restore|push）", args[0])
 	}
 }
 
@@ -462,25 +464,9 @@ func cmdBackupReport(args []string) error {
 	}
 	verified := map[string]backup.VerifyResult{}
 	if *doVerify {
-		for _, host := range sortedKeys(byHost) {
-			files := byHost[host]
-			if len(files) == 0 {
-				continue
-			}
-			c, derr := dial.Dial(hostByIP(hosts)[host])
-			if derr != nil {
-				errs = append(errs, fmt.Errorf("%s SSH 连接失败: %w", host, derr))
-				continue
-			}
-			for _, f := range files {
-				cmdStr, cerr := backup.VerifyCommand(f.Path)
-				if cerr != nil {
-					continue
-				}
-				res, _ := c.Run(cmdStr)
-				verified[f.Path] = backup.ParseVerify(f.Path, res)
-			}
-		}
+		var verrs []error
+		verified, verrs = verifyStored(hosts, byHost, dial)
+		errs = append(errs, verrs...)
 	}
 
 	led := mergeLedgers(root, cfg.Backup.EffectiveKeepDays(), targets, byHost, verified, time.Now())
@@ -495,6 +481,102 @@ func cmdBackupReport(args []string) error {
 			return err
 		}
 		fmt.Printf("台账已写入 %s（%s）\n", *out, led.Summary())
+	}
+	for _, e := range errs {
+		fmt.Fprintln(os.Stderr, "  [警告]", e)
+	}
+	return nil
+}
+
+// verifyStored 逐台主机校验备份完整性（backup report/push 共用）。
+// 连接失败按主机记一条错误，不中断其余主机。
+func verifyStored(hosts []config.Host, byHost map[string][]backup.StoredFile,
+	dial *execDialer) (map[string]backup.VerifyResult, []error) {
+
+	verified := map[string]backup.VerifyResult{}
+	var errs []error
+	for _, host := range sortedKeys(byHost) {
+		files := byHost[host]
+		if len(files) == 0 {
+			continue
+		}
+		c, derr := dial.Dial(hostByIP(hosts)[host])
+		if derr != nil {
+			errs = append(errs, fmt.Errorf("%s SSH 连接失败: %w", host, derr))
+			continue
+		}
+		for _, f := range files {
+			cmdStr, cerr := backup.VerifyCommand(f.Path)
+			if cerr != nil {
+				continue
+			}
+			res, _ := c.Run(cmdStr)
+			verified[f.Path] = backup.ParseVerify(f.Path, res)
+		}
+	}
+	return verified, errs
+}
+
+// cmdBackupPush 读现场台账并生成 ztoa「项目备份中间表」行 payload。
+// 本命令不联网：只输出 JSON，真实写表由上层用 ztoa MCP 执行。
+func cmdBackupPush(args []string) error {
+	fs := flag.NewFlagSet("backup push", flag.ExitOnError)
+	cfgPath := fs.String("c", "config.yaml", "配置文件")
+	app := fs.String("app", "all", "应用名筛选（all=全部）")
+	out := fs.String("out", "", "输出 payload JSON 文件（默认 stdout）")
+	doVerify := fs.Bool("verify", false, "同时校验每份备份（较慢）")
+	project := fs.String("project", "", "项目名称（默认留空，由上层补）")
+	region := fs.String("region", "", "所属大区（默认留空）")
+	area := fs.String("area", "", "所属区域（默认留空）")
+	level := fs.String("level", "", "项目定级（默认留空）")
+	status := fs.String("status", "", "项目状态（默认留空）")
+	fs.Parse(args)
+
+	cfg, all, err := backupCfg(*cfgPath, false)
+	if err != nil {
+		return err
+	}
+	// 备份中间表同时统计应用与数据库，数据库目标始终纳入。
+	targets := backupSel{app: *app, mysql: true}.apply(all)
+	root := cfg.Backup.EffectiveRoot()
+	dial := &execDialer{cfg: cfg, over: sshOverride()}
+	defer dial.Close()
+
+	hosts := backupHosts(targets)
+	byHost, errs := gatherStored(cfg, hosts, root, dial)
+	if len(byHost) == 0 && len(hosts) > 0 {
+		return fmt.Errorf("全部 %d 台主机连接失败，无法生成备份 payload", len(hosts))
+	}
+	verified := map[string]backup.VerifyResult{}
+	if *doVerify {
+		var verrs []error
+		verified, verrs = verifyStored(hosts, byHost, dial)
+		errs = append(errs, verrs...)
+	}
+
+	now := time.Now()
+	led := mergeLedgers(root, cfg.Backup.EffectiveKeepDays(), targets, byHost, verified, now)
+	payload, err := backup.BuildPushPayload(led, backup.PushMeta{
+		ProjectName:   *project,
+		Region:        *region,
+		Area:          *area,
+		ProjectLevel:  *level,
+		ProjectStatus: *status,
+	}, now)
+	if err != nil {
+		return err
+	}
+	b, err := payload.JSON()
+	if err != nil {
+		return err
+	}
+	if *out == "" {
+		fmt.Println(string(b))
+	} else {
+		if err := os.WriteFile(*out, append(b, '\n'), 0o644); err != nil {
+			return err
+		}
+		fmt.Printf("payload 已写入 %s（%d 个控件）\n", *out, len(payload.Controls))
 	}
 	for _, e := range errs {
 		fmt.Fprintln(os.Stderr, "  [警告]", e)
