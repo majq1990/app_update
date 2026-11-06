@@ -17,7 +17,7 @@ import (
 
 func cmdInspect(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("用法: app-updater inspect list|run|security -c config.yaml [选项]")
+		return fmt.Errorf("用法: eops inspect list|run|security -c config.yaml [选项]")
 	}
 	switch args[0] {
 	case "list":

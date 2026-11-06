@@ -1,4 +1,4 @@
-// app-updater 是 Java 应用更新工具的 Go 重写版。
+// eops（原名 app-updater）是统一运维工具的 Go 实现。
 // 本阶段实现配置链路：Excel 模板生成 / 导入校验 / YAML 兼容 / 反向导出。
 // 更新与回滚执行链路为后续阶段（命令已占位）。
 package main
@@ -18,16 +18,16 @@ import (
 	"github.com/majq1990/app-updater-go/internal/xlsx"
 )
 
-const usage = `app-updater — Java 应用更新工具 (Go 版)
+const usage = `eops — 统一运维工具（应用更新/回滚 · 日志 · 备份 · 巡检 · 监控 · 加固）
 
 直接运行（无参数）进入交互菜单模式；以下子命令供脚本化调用。
-可用 app-updater version 查看版本。
+可用 eops version 查看版本。
 用法:
-  app-updater template [-o 模板.xlsx]          生成 Excel 配置模板
-  app-updater import  -f 配置.xlsx [-o config.yaml]  导入+校验，生成 YAML
-  app-updater validate -f 配置.xlsx            只校验不落盘
-  app-updater export  -c config.yaml [-o 配置.xlsx]  YAML 反向导出 Excel（存量迁移核对）
-  app-updater gen-from-oneinstall              从一键部署自动生成配置初稿。
+  eops template [-o 模板.xlsx]          生成 Excel 配置模板
+  eops import  -f 配置.xlsx [-o config.yaml]  导入+校验，生成 YAML
+  eops validate -f 配置.xlsx            只校验不落盘
+  eops export  -c config.yaml [-o 配置.xlsx]  YAML 反向导出 Excel（存量迁移核对）
+  eops gen-from-oneinstall              从一键部署自动生成配置初稿。
       无参数时在本机自动识别（工具装在一键部署控制节点上可直接运行）；
       否则来源三选一:
       --ssh <主机> [--port N] [--user root] [--pass xxx | --key path]
@@ -36,61 +36,61 @@ const usage = `app-updater — Java 应用更新工具 (Go 版)
       --dir <本地inventory目录>                   本地 v2 三件套
       --conf <本地 install-multi.conf>            本地 v1 conf
       [-o 初稿.xlsx] [--yaml config.yaml] [--include-undeployed]
-  app-updater setup-ssh -c config.yaml [--app 名称] [--pass xxx]
+  eops setup-ssh -c config.yaml [--app 名称] [--pass xxx]
       确保本机密钥对存在，并把公钥推送到各主机的 authorized_keys（免密登录，
       纯 Go 实现，替代 sshpass+ssh-copy-id；密码优先级 --pass > 环境变量 > 配置）
-  app-updater update -c config.yaml --app 名称  执行应用更新（源目录 update/<应用名>/）
+  eops update -c config.yaml --app 名称  执行应用更新（源目录 update/<应用名>/）
       [--groups master,update]                  默认先 master 后 update
       [--static full|partial|jar]               静态页面更新模式（tomcat full 需先更代码群组）
       [--static-path view/css]                  partial 模式：应用内相对路径
       [--static-src 本地目录]                    jar 模式：本地静态文件目录
       [--dry-run] [--yes]                       不带 --yes 一律只出计划不执行
-  app-updater rollback -c config.yaml --app 名称 [--version 备份版本]
+  eops rollback -c config.yaml --app 名称 [--version 备份版本]
       [--groups master,update,static] [--list] [--dry-run] [--yes]
-  app-updater clean-update [--dir update] [--dry-run] [--yes]
+  eops clean-update [--dir update] [--dry-run] [--yes]
       清理 update/ 下的历史更新包（交互菜单：配置管理 11）
-  app-updater compress-backups [--dir backups] [--workers N] [--dry-run] [--yes]
+  eops compress-backups [--dir backups] [--workers N] [--dry-run] [--yes]
       对未压缩的备份版本目录做多线程 tar.gz 压缩（交互菜单：配置管理 12）
-  app-updater logs clean -c config.yaml [--app 名称|all] [--support kind|all] [--dry-run] [--yes]
+  eops logs clean -c config.yaml [--app 名称|all] [--support kind|all] [--dry-run] [--yes]
       清理过期日志（应用 log_dir + supports 支持软件目录；白名单命中才删，dry-run 默认）
-  app-updater logs gather -c config.yaml [--app 名称|all] [--support kind|all] [--window 4h] [--out 目录]
+  eops logs gather -c config.yaml [--app 名称|all] [--support kind|all] [--window 4h] [--out 目录]
       拉取时间窗内的日志段到本地（远端 awk 过滤，只传命中行；catalina.out 走末尾 tail），
       并统计 ERROR/Exception 计数
-  app-updater logs rotate check -c config.yaml [--app 名称|all] [--support kind|all]
+  eops logs rotate check -c config.yaml [--app 名称|all] [--support kind|all]
       切割体检（只读）：logrotate 配置存在性/语法/覆盖漂移 + 未切割大文件 + 增长率预警
-  app-updater logs rotate setup -c config.yaml [--app 名称|all] [--support kind|all] [--dry-run] [--yes] [--force]
+  eops logs rotate setup -c config.yaml [--app 名称|all] [--support kind|all] [--dry-run] [--yes] [--force]
       生成并推送 /etc/logrotate.d/ 片段（copytruncate 适配；推送后 logrotate -d 语法验证，
       绝不强制轮转；远端已有不同配置默认跳过，--force 才覆盖）
-  app-updater backup run -c config.yaml [--app 名称|all] [--mysql] [--dry-run] [--yes]
+  eops backup run -c config.yaml [--app 名称|all] [--mysql] [--dry-run] [--yes]
       现场备份：应用目录打包（web_path）+ 可选数据库逻辑备份，产物落 backup.root（默认 /egova/backup）
-  app-updater backup list -c config.yaml [--app 名称|all] [--mysql] [--json]
+  eops backup list -c config.yaml [--app 名称|all] [--mysql] [--json]
       列出现场已有备份（只认本工具 eops- 前缀产物），--json 输出台账
-  app-updater backup verify -c config.yaml [--app 名称|all] [--mysql]
+  eops backup verify -c config.yaml [--app 名称|all] [--mysql]
       校验备份完整性（gzip -t / tar -t / sha256 / 大小）
-  app-updater backup prune -c config.yaml [--keep-days N] [--dry-run] [--yes]
+  eops backup prune -c config.yaml [--keep-days N] [--dry-run] [--yes]
       清理超过保留期的备份（只处理本工具 eops- 产物，绝不碰现场其他文件）
-  app-updater backup report -c config.yaml [--out 台账.json] [--verify]
+  eops backup report -c config.yaml [--out 台账.json] [--verify]
       导出台账 JSON（供项目管理表推送；--verify 同时校验并带 sha256）
-  app-updater inspect run -c config.yaml [--dim os,security,middleware] [--host IP|all]
+  eops inspect run -c config.yaml [--dim os,security,middleware] [--host IP|all]
       [--json 报告.json] [--parallel 4] [--fail-on warn|error|critical|none]
       项目巡检：SSH 直连执行只读检查（OS/安全/中间件），终端摘要 + 可选 JSON 报告
-  app-updater inspect security -c config.yaml [--json 报告.json]
+  eops inspect security -c config.yaml [--json 报告.json]
       安全检查快捷入口（等同 --dim security）
-  app-updater inspect list [--dim os|security|middleware]
+  eops inspect list [--dim os|security|middleware]
       列出内置检查项
-  app-updater monitor doctor -c config.yaml [--role agent|proxy|all] [--host IP|all] [--json 报告.json]
+  eops monitor doctor -c config.yaml [--role agent|proxy|all] [--host IP|all] [--json 报告.json]
       监控诊断（只读）：agent/proxy 进程、端口、配置、插件、PSK、备份目录、云中心连通性
-  app-updater monitor fix -c config.yaml [--role agent|proxy|all] [--dry-run] [--yes]
+  eops monitor fix -c config.yaml [--role agent|proxy|all] [--dry-run] [--yes]
       白名单修复：仅 systemctl start/restart zabbix-agent|zabbix-proxy，默认 dry-run
-  app-updater monitor plan -c config.yaml
+  eops monitor plan -c config.yaml
       输出监控部署检查清单（对照 FAQ wiki，不执行）
-  app-updater harden check -c config.yaml [--host IP|all]
+  eops harden check -c config.yaml [--host IP|all]
       安全加固清单（只读）：把安全巡检发现映射成加固建议与风险级别
-  app-updater harden snippets -c config.yaml
+  eops harden snippets -c config.yaml
       输出可粘贴的加固片段（sshd/sysctl/防火墙），人工确认后执行
-  app-updater harden report -c config.yaml [--out 台账.json]
+  eops harden report -c config.yaml [--out 台账.json]
       导出加固台账 JSON
-  app-updater version                          查看版本
+  eops version                          查看版本
 `
 
 // cliArgs 复刻 os.Args 的受控副本：只读一次，之后全程序（含子命令 flag 解析）
@@ -169,10 +169,10 @@ func main() {
 			} else if sub == "rotate" {
 				err = cmdLogsRotate(cliArgs[3:])
 			} else {
-				err = fmt.Errorf("用法: app-updater logs clean|gather|rotate ... -c config.yaml（详见 app-updater 帮助）")
+				err = fmt.Errorf("用法: eops logs clean|gather|rotate ... -c config.yaml（详见 eops 帮助）")
 			}
 		} else {
-			err = fmt.Errorf("用法: app-updater logs clean|gather|rotate ... -c config.yaml（详见 app-updater 帮助）")
+			err = fmt.Errorf("用法: eops logs clean|gather|rotate ... -c config.yaml（详见 eops 帮助）")
 		}
 	case "backup":
 		err = cmdBackup(cliArgs[2:])

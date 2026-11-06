@@ -177,7 +177,7 @@ func cmdLogsClean(args []string) error {
 // cmdLogsRotate logs rotate check（只读体检）/ setup（推送配置，闸门变更）。
 func cmdLogsRotate(args []string) error {
 	if len(args) == 0 || (args[0] != "check" && args[0] != "setup") {
-		return fmt.Errorf("用法: app-updater logs rotate check|setup -c config.yaml [选项]")
+		return fmt.Errorf("用法: eops logs rotate check|setup -c config.yaml [选项]")
 	}
 	rest := args[1:]
 	if args[0] == "check" {

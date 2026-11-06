@@ -18,6 +18,6 @@ func versionString() string {
 	if buildTime != "" {
 		s += " (" + buildTime + ")"
 	}
-	return fmt.Sprintf("app-updater %s  %s/%s  %s",
+	return fmt.Sprintf("eops %s  %s/%s  %s",
 		s, runtime.GOOS, runtime.GOARCH, runtime.Version())
 }

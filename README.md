@@ -1,6 +1,8 @@
-# app-updater
+# eops
 
-Java 应用更新工具（Go 版）——通过 SSH 自动化 Java 应用（Tomcat WAR / 独立 JAR）的**更新与回滚**，替代早期 Python+Bash+Docker 实现。
+统一运维工具（原名 app-updater，Go 版）——通过 SSH 自动化 Java 应用（Tomcat WAR / 独立 JAR）的**更新与回滚**，并提供日志、备份、巡检、监控、加固等日常运维能力，替代早期 Python+Bash+Docker 实现。
+
+> **改名说明**：本工具自本轮起更名为 **eops**。旧名 `app-updater` 的二进制仍可用（同一程序，行为一致），老脚本无需修改；go module 路径与 `cmd/app-updater` 目录名保持不变。
 
 > 旧版 Python 实现完整保留在 [`legacy-python-archive`](https://github.com/majq1990/app_update/tree/legacy-python-archive) 分支（含全部历史提交），该分支已废弃不再维护，仅作对照。
 
@@ -21,30 +23,30 @@ Java 应用更新工具（Go 版）——通过 SSH 自动化 Java 应用（Tomc
 
 ```bash
 # 1. 下载对应平台产物（或自行构建：./build.sh v1.0.0）
-chmod +x app-updater-linux-amd64
-mv app-updater-linux-amd64 app-updater
+chmod +x eops-linux-amd64
+mv eops-linux-amd64 eops
 
 # 2. 查看版本
-./app-updater version
+./eops version
 
 # 3. 进入交互菜单（推荐）
-./app-updater
+./eops
 
 # 或使用子命令
-./app-updater gen-from-oneinstall -o 初稿.xlsx --yaml config.yaml   # 识别一键部署清单
-./app-updater setup-ssh -c config.yaml                              # 免密初始化
-./app-updater update -c config.yaml --app usercenter                # dry-run
-./app-updater update -c config.yaml --app usercenter --yes          # 正式执行
-./app-updater rollback -c config.yaml --app usercenter --list       # 可回滚版本
-./app-updater logs clean -c config.yaml                             # 日志清理（dry-run）
-./app-updater backup run -c config.yaml                             # 备份计划（dry-run）
-./app-updater backup run -c config.yaml --yes                       # 现场备份（产物留现场）
-./app-updater backup verify -c config.yaml                          # 完整性校验
-./app-updater backup report -c config.yaml --out 台账.json --verify  # 台账导出
-./app-updater inspect run -c config.yaml --json 巡检.json            # 巡检（只读）
-./app-updater inspect security -c config.yaml                        # 只看安全
-./app-updater monitor doctor -c config.yaml                          # 监控诊断
-./app-updater harden check -c config.yaml                            # 加固清单（只读）
+./eops gen-from-oneinstall -o 初稿.xlsx --yaml config.yaml   # 识别一键部署清单
+./eops setup-ssh -c config.yaml                              # 免密初始化
+./eops update -c config.yaml --app usercenter                # dry-run
+./eops update -c config.yaml --app usercenter --yes          # 正式执行
+./eops rollback -c config.yaml --app usercenter --list       # 可回滚版本
+./eops logs clean -c config.yaml                             # 日志清理（dry-run）
+./eops backup run -c config.yaml                             # 备份计划（dry-run）
+./eops backup run -c config.yaml --yes                       # 现场备份（产物留现场）
+./eops backup verify -c config.yaml                          # 完整性校验
+./eops backup report -c config.yaml --out 台账.json --verify  # 台账导出
+./eops inspect run -c config.yaml --json 巡检.json            # 巡检（只读）
+./eops inspect security -c config.yaml                        # 只看安全
+./eops monitor doctor -c config.yaml                          # 监控诊断
+./eops harden check -c config.yaml                            # 加固清单（只读）
 ```
 
 ## 配置
@@ -140,7 +142,7 @@ go test ./...         # 全量测试
 
 ## 文档
 
-完整使用说明（含操作记录、更新记录、健康检查标准地址表）见发布包内 `app-updater使用说明.md`。
+完整使用说明（含操作记录、更新记录、健康检查标准地址表）见发布包内 `app-updater操作手册.md`（内容已按 eops 更新；旧文件名保留）。
 
 ## 平台验证状态
 

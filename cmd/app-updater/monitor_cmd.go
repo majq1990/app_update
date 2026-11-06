@@ -17,7 +17,7 @@ import (
 
 func cmdMonitor(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("用法: app-updater monitor doctor|fix|plan -c config.yaml [选项]")
+		return fmt.Errorf("用法: eops monitor doctor|fix|plan -c config.yaml [选项]")
 	}
 	switch args[0] {
 	case "doctor":

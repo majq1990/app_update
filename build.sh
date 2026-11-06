@@ -22,11 +22,11 @@ build() {
   GOOS="$goos" GOARCH="$goarch" go build -ldflags "$LDFLAGS" -o "dist/$out" ./cmd/app-updater
 }
 
-build linux   amd64 "app-updater-linux-amd64"
-build linux   arm64 "app-updater-linux-arm64"
-build windows amd64 "app-updater-windows-amd64.exe"
-build windows arm64 "app-updater-windows-arm64.exe"
-build darwin  arm64 "app-updater-darwin-arm64"
+build linux   amd64 "eops-linux-amd64"
+build linux   arm64 "eops-linux-arm64"
+build windows amd64 "eops-windows-amd64.exe"
+build windows arm64 "eops-windows-arm64.exe"
+build darwin  arm64 "eops-darwin-arm64"
 
 echo
 echo "=== 产物 ==="

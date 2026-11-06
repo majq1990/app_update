@@ -19,7 +19,7 @@ import (
 
 func cmdBackup(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("用法: app-updater backup run|list|verify|prune|clean|report -c config.yaml [选项]")
+		return fmt.Errorf("用法: eops backup run|list|verify|prune|clean|report -c config.yaml [选项]")
 	}
 	switch args[0] {
 	case "run":
