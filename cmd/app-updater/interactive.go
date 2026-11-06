@@ -81,15 +81,18 @@ func runInteractive() {
   %s
   当前配置: %s
 ============================================
+—— 项目交付 ——
 1. 应用更新
 2. 应用回滚
-3. 配置管理（识别一键 / 表格导入 / 导出当前配置）
-4. 免密初始化
-5. 日志运维（汇聚 / 清理，含支持软件 mysql·redis·nginx·达梦）
-6. 备份运维（执行 / 清单 / 校验 / 清理 / 台账）
-7. 项目巡检（OS / 安全 / 中间件，只读）
-8. 监控运维（agent/proxy 诊断、白名单修复、部署清单）
-9. 安全加固（只读清单 / 建议片段 / 台账）
+3. 备份运维（执行 / 清单 / 校验 / 清理 / 台账）
+—— 日常运维 ——
+4. 日志运维（汇聚 / 清理 / 切割）
+5. 项目巡检（OS / 安全 / 中间件）
+6. 监控运维（诊断 / 白名单修复 / 部署清单）
+7. 安全加固（只读清单 / 建议片段 / 台账）
+—— 配置与接入 ——
+8. 配置管理（识别一键 / 表格导入 / 导出）
+9. 免密初始化
 0. 退出
 `, versionString(), curCfgPath)
 		switch getIntChoice("请选择", 0, 9) {
@@ -98,19 +101,19 @@ func runInteractive() {
 		case 2:
 			menuRollback()
 		case 3:
-			menuConfig()
-		case 4:
-			menuSetupSSH()
-		case 5:
-			menuLogs()
-		case 6:
 			menuBackup()
-		case 7:
+		case 4:
+			menuLogs()
+		case 5:
 			menuInspect()
-		case 8:
+		case 6:
 			menuMonitor()
-		case 9:
+		case 7:
 			menuHarden()
+		case 8:
+			menuConfig()
+		case 9:
+			menuSetupSSH()
 		case 0:
 			fmt.Println("再见。")
 			return
@@ -349,7 +352,7 @@ func menuRollback() {
 	reportSummary(sum)
 }
 
-// ---- 3. 配置管理：识别 / 导入 与 导出 彻底拆分 ----
+// ---- 8. 配置管理：识别 / 导入 与 导出 彻底拆分 ----
 
 func menuConfig() {
 	for {
@@ -995,7 +998,7 @@ func configFromXlsx() {
 	fmt.Printf("✅ 已载入当前配置: %s（%d 个应用）\n", curCfgPath, len(cfg.Webs))
 }
 
-// ---- 4. 免密初始化 ----
+// ---- 9. 免密初始化 ----
 
 func menuSetupSSH() {
 	args := []string{"-c", getInput("配置文件路径", curCfgPath)}
