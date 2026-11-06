@@ -57,6 +57,7 @@ func cmdMonitorDoctor(args []string) error {
 
 	rep := inspect.BuildReport(results, time.Now())
 	rep.Text(os.Stdout)
+	dumpDailyReport(reportKindMonitor, rep)
 
 	if *jsonOut != "" {
 		b, jerr := rep.JSON()

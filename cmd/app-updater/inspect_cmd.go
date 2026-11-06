@@ -103,6 +103,7 @@ func cmdInspectRun(args []string, presetDims []inspect.Dimension) error {
 	rep := inspect.BuildReport(results, time.Now())
 	rep.Text(os.Stdout)
 	fmt.Printf("耗时 %s\n", time.Since(start).Round(time.Second))
+	dumpDailyReport(reportKindInspect, rep)
 
 	if *jsonOut != "" {
 		b, jerr := rep.JSON()
