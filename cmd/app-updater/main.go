@@ -61,6 +61,35 @@ const usage = `app-updater — Java 应用更新工具 (Go 版)
   app-updater logs rotate setup -c config.yaml [--app 名称|all] [--support kind|all] [--dry-run] [--yes] [--force]
       生成并推送 /etc/logrotate.d/ 片段（copytruncate 适配；推送后 logrotate -d 语法验证，
       绝不强制轮转；远端已有不同配置默认跳过，--force 才覆盖）
+  app-updater backup run -c config.yaml [--app 名称|all] [--mysql] [--dry-run] [--yes]
+      现场备份：应用目录打包（web_path）+ 可选数据库逻辑备份，产物落 backup.root（默认 /egova/backup）
+  app-updater backup list -c config.yaml [--app 名称|all] [--mysql] [--json]
+      列出现场已有备份（只认本工具 eops- 前缀产物），--json 输出台账
+  app-updater backup verify -c config.yaml [--app 名称|all] [--mysql]
+      校验备份完整性（gzip -t / tar -t / sha256 / 大小）
+  app-updater backup prune -c config.yaml [--keep-days N] [--dry-run] [--yes]
+      清理超过保留期的备份（只处理本工具 eops- 产物，绝不碰现场其他文件）
+  app-updater backup report -c config.yaml [--out 台账.json] [--verify]
+      导出台账 JSON（供项目管理表推送；--verify 同时校验并带 sha256）
+  app-updater inspect run -c config.yaml [--dim os,security,middleware] [--host IP|all]
+      [--json 报告.json] [--parallel 4] [--fail-on warn|error|critical|none]
+      项目巡检：SSH 直连执行只读检查（OS/安全/中间件），终端摘要 + 可选 JSON 报告
+  app-updater inspect security -c config.yaml [--json 报告.json]
+      安全检查快捷入口（等同 --dim security）
+  app-updater inspect list [--dim os|security|middleware]
+      列出内置检查项
+  app-updater monitor doctor -c config.yaml [--role agent|proxy|all] [--host IP|all] [--json 报告.json]
+      监控诊断（只读）：agent/proxy 进程、端口、配置、插件、PSK、备份目录、云中心连通性
+  app-updater monitor fix -c config.yaml [--role agent|proxy|all] [--dry-run] [--yes]
+      白名单修复：仅 systemctl start/restart zabbix-agent|zabbix-proxy，默认 dry-run
+  app-updater monitor plan -c config.yaml
+      输出监控部署检查清单（对照 FAQ wiki，不执行）
+  app-updater harden check -c config.yaml [--host IP|all]
+      安全加固清单（只读）：把安全巡检发现映射成加固建议与风险级别
+  app-updater harden snippets -c config.yaml
+      输出可粘贴的加固片段（sshd/sysctl/防火墙），人工确认后执行
+  app-updater harden report -c config.yaml [--out 台账.json]
+      导出加固台账 JSON
   app-updater version                          查看版本
 `
 
@@ -145,6 +174,14 @@ func main() {
 		} else {
 			err = fmt.Errorf("用法: app-updater logs clean|gather|rotate ... -c config.yaml（详见 app-updater 帮助）")
 		}
+	case "backup":
+		err = cmdBackup(cliArgs[2:])
+	case "inspect":
+		err = cmdInspect(cliArgs[2:])
+	case "monitor":
+		err = cmdMonitor(cliArgs[2:])
+	case "harden":
+		err = cmdHarden(cliArgs[2:])
 	case "version", "-v", "--version":
 		fmt.Println(versionString())
 	case "help", "-h", "--help":

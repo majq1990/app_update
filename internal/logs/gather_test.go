@@ -87,8 +87,8 @@ func TestGatherFilesWindowAndCount(t *testing.T) {
 
 	r := fakeRunner{root}
 	res := GatherFiles(r, files, []Target{tg}, GatherOptions{
-		Window:  4 * time.Hour, // [06:00, 10:00)
-		OutDir:  out,
+		Window:   4 * time.Hour, // [06:00, 10:00)
+		OutDir:   out,
 		MaxBytes: 1 << 20,
 	}, now)
 
@@ -152,9 +152,12 @@ func TestGatherCatalinaTail(t *testing.T) {
 func TestGatherMaxBytesTruncates(t *testing.T) {
 	root := t.TempDir()
 	out := t.TempDir()
+	// 时间戳相对当前时间生成：固定日期会随时间滑出 24h 窗口，造成假失败
+	now := time.Now()
+	ts := now.Add(-time.Hour).Format("2006-01-02 15:04:05")
 	var lines []string
 	for i := 0; i < 100; i++ {
-		lines = append(lines, "2026-11-05 08:00:00 ERROR blahblahblah")
+		lines = append(lines, ts+" ERROR blahblahblah")
 	}
 	p := filepath.Join(root, "app", "logs", "app.log")
 	os.MkdirAll(filepath.Dir(p), 0o755)
@@ -166,7 +169,7 @@ func TestGatherMaxBytesTruncates(t *testing.T) {
 
 	res := GatherFiles(fakeRunner{root}, files, []Target{tg}, GatherOptions{
 		Window: 24 * time.Hour, OutDir: out, MaxBytes: 100,
-	}, time.Now())
+	}, now)
 	if len(res.Files) != 1 {
 		t.Fatalf("files=%d", len(res.Files))
 	}

@@ -86,9 +86,13 @@ func runInteractive() {
 3. 配置管理（识别一键 / 表格导入 / 导出当前配置）
 4. 免密初始化
 5. 日志运维（汇聚 / 清理，含支持软件 mysql·redis·nginx·达梦）
+6. 备份运维（执行 / 清单 / 校验 / 清理 / 台账）
+7. 项目巡检（OS / 安全 / 中间件，只读）
+8. 监控运维（agent/proxy 诊断、白名单修复、部署清单）
+9. 安全加固（只读清单 / 建议片段 / 台账）
 0. 退出
 `, versionString(), curCfgPath)
-		switch getIntChoice("请选择", 0, 5) {
+		switch getIntChoice("请选择", 0, 9) {
 		case 1:
 			menuUpdate()
 		case 2:
@@ -99,6 +103,14 @@ func runInteractive() {
 			menuSetupSSH()
 		case 5:
 			menuLogs()
+		case 6:
+			menuBackup()
+		case 7:
+			menuInspect()
+		case 8:
+			menuMonitor()
+		case 9:
+			menuHarden()
 		case 0:
 			fmt.Println("再见。")
 			return

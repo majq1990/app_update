@@ -12,6 +12,9 @@ Java 应用更新工具（Go 版）——通过 SSH 自动化 Java 应用（Tomc
 - **健康检查**：默认在目标机本地探测（不受工具机到应用端口网络限制）；有 URI 走 HTTP 200，无 URI 按端口 TCP 探测；预算可配
 - **一键部署识别**：从 oneinstall v1/v2 部署清单自动生成配置（systemd 单元名、标准健康检查地址、liquibase 排除规则自动填充）
 - **Excel 配置**：模板生成 / 导入校验 / 反向导出，适合现场人工填写与核对
+- **运维扩展**：日志运维（汇聚/清理/切割体检与下发）、备份运维（现场留包/完整性校验/保留期清理/台账导出）、
+  项目巡检（OS/安全/中间件 20 项只读检查）、监控诊断（agent/proxy/PSK/备份目录/云连通性）、
+  安全加固清单（只读建议，不改网络与内核）
 - **安全**：所有改服务器的操作先 dry-run，需 `--yes` 才执行；回滚保护运行期日志
 
 ## 快速开始
@@ -33,6 +36,15 @@ mv app-updater-linux-amd64 app-updater
 ./app-updater update -c config.yaml --app usercenter                # dry-run
 ./app-updater update -c config.yaml --app usercenter --yes          # 正式执行
 ./app-updater rollback -c config.yaml --app usercenter --list       # 可回滚版本
+./app-updater logs clean -c config.yaml                             # 日志清理（dry-run）
+./app-updater backup run -c config.yaml                             # 备份计划（dry-run）
+./app-updater backup run -c config.yaml --yes                       # 现场备份（产物留现场）
+./app-updater backup verify -c config.yaml                          # 完整性校验
+./app-updater backup report -c config.yaml --out 台账.json --verify  # 台账导出
+./app-updater inspect run -c config.yaml --json 巡检.json            # 巡检（只读）
+./app-updater inspect security -c config.yaml                        # 只看安全
+./app-updater monitor doctor -c config.yaml                          # 监控诊断
+./app-updater harden check -c config.yaml                            # 加固清单（只读）
 ```
 
 ## 配置
@@ -61,6 +73,43 @@ webs:
         user: egova
         group: egova
         health_mode: remote       # 留空=remote（默认）/ local / none
+
+# 支持软件（日志 + 备份目标；mysql 另支持 mysqldump）
+supports:
+  - kind: mysql
+    name: 业务库
+    hosts:
+      - host: 172.21.133.230
+  - kind: redis
+    name: 缓存
+    backup_paths: [/egova/apps/redis/data/dump.rdb]
+    hosts:
+      - host: 172.21.133.230
+
+# 备份运维（backup 子命令）
+backup:
+  root: /egova/backup          # 备份根目录（默认）
+  keep_days: 14                # 保留天数
+  databases: [eurbanpro]       # 需要 mysqldump 的库（空=不备份数据库）
+  dump_defaults_file: /root/.my.cnf   # 凭据文件；工具不保存数据库口令
+  exclude: [tmp/, '*.pid']     # 打包排除（相对应用根）
+```
+
+备份产物命名固定 `eops-<目标>-<主机>-<时分秒>.tar.gz|.sql.gz`，放在 `backup.root/<日期>/`；
+`prune` 只处理该前缀产物，绝不误删现场其他文件。台账 JSON 供项目管理表推送，工具本身不联网。
+
+```yaml
+# 监控运维（monitor doctor/fix/plan）
+monitor:
+  server: zabbix.egova.com.cn
+  server_port: 7001
+  agent_port: 9000          # wiki 约定的受控机 agent 端口
+  proxy_port: 9001
+  yum_port: 8080
+  proxy_hosts:              # 主控机（proxy）
+    - host: 172.21.133.10
+  agent_hosts: []           # 受控机；留空=用 webs + supports 的主机
+  # agent_conf / proxy_conf / plugin_dir / script_dir / psk_file 均有默认值，按现场覆盖
 ```
 
 ## 项目结构
@@ -73,6 +122,11 @@ internal/xlsx/         Excel 模板/导入/导出
 internal/syncx/        同步引擎（增量、排除、保留、清理、dry-run）
 internal/sshx/         SSH 层（连接、密钥对、免密推送、SFTP 适配器）
 internal/appflow/      执行流程（update / rollback / 静态页面 / 健康检查）
+internal/logs/         日志运维（clean / gather / rotate）
+internal/backup/       备份运维（tar / mysqldump / 校验 / 保留期 / 台账）
+internal/inspect/      项目巡检（20 项只读检查：OS / 安全 / 中间件）
+internal/monitor/      监控诊断（agent / proxy / PSK / 备份目录 / 云连通性）
+internal/harden/       安全加固清单（巡检发现 → 建议片段 / 台账，首期不改配置）
 testdata/oneinstall/   真实部署清单快照（测试夹具）
 dist/                  发布包（二进制由 .gitignore 排除，仅保留清单）
 ```
