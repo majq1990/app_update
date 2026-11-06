@@ -71,6 +71,9 @@ const usage = `eops — 统一运维工具（应用更新/回滚 · 日志 · �
       清理超过保留期的备份（只处理本工具 eops- 产物，绝不碰现场其他文件）
   eops backup report -c config.yaml [--out 台账.json] [--verify]
       导出台账 JSON（供项目管理表推送；--verify 同时校验并带 sha256）
+  eops backup restore -c config.yaml --app 应用名 --file 备份包.tar.gz [--dry-run] [--yes]
+      从现场 eops-*.tar.gz 恢复应用：停应用→变更前自动备份→解压→属主→启动→健康检查
+      （默认 dry-run 打印完整计划；备份包必须位于 backup.root 下）
   eops inspect run -c config.yaml [--dim os,security,middleware] [--host IP|all]
       [--json 报告.json] [--parallel 4] [--fail-on warn|error|critical|none]
       项目巡检：SSH 直连执行只读检查（OS/安全/中间件），终端摘要 + 可选 JSON 报告

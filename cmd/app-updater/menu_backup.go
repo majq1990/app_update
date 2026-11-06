@@ -20,9 +20,10 @@ func menuBackup() {
 3. 备份校验（gzip/tar/sha256）
 4. 清理过期备份（保留期，先列出）
 5. 导出台账 JSON（可带校验）
+6. 从备份恢复应用（停应用→自动备份→解压→属主→启动→健康检查）
 0. 返回主菜单
 `, curCfgPath)
-		switch getIntChoice("请选择", 0, 5) {
+		switch getIntChoice("请选择", 0, 6) {
 		case 1:
 			menuBackupRun()
 		case 2:
@@ -33,6 +34,8 @@ func menuBackup() {
 			menuBackupPrune()
 		case 5:
 			menuBackupReport()
+		case 6:
+			menuBackupRestore()
 		case 0:
 			return
 		}
@@ -133,6 +136,40 @@ func menuBackupPrune() {
 	}
 	args = append(args, "--yes")
 	if err := cmdBackupPrune(args); err != nil {
+		fmt.Println("❌", err)
+	}
+}
+
+func menuBackupRestore() {
+	if _, ok := checkConfigForMenu(); !ok {
+		return
+	}
+	sc := bufio.NewReader(os.Stdin)
+	fmt.Print("要恢复的应用名: ")
+	app := strings.TrimSpace(readLine(sc))
+	if app == "" {
+		fmt.Println("应用名不能为空")
+		return
+	}
+	fmt.Print("远端备份包路径（backup.root 下 eops-*.tar.gz）: ")
+	file := strings.TrimSpace(readLine(sc))
+	if file == "" {
+		fmt.Println("备份包路径不能为空")
+		return
+	}
+	args := []string{"-c", curCfgPath, "--app", app, "--file", file}
+	fmt.Println("\n（先出恢复计划 dry-run；确认后执行）")
+	if err := cmdBackupRestore(args); err != nil {
+		fmt.Println("❌", err)
+		return
+	}
+	fmt.Print("\n确认按以上计划执行恢复？(y/N): ")
+	if strings.ToLower(strings.TrimSpace(readLine(sc))) != "y" {
+		fmt.Println("已取消")
+		return
+	}
+	args = append(args, "--yes")
+	if err := cmdBackupRestore(args); err != nil {
 		fmt.Println("❌", err)
 	}
 }

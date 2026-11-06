@@ -32,8 +32,10 @@ func cmdBackup(args []string) error {
 		return cmdBackupPrune(args[1:])
 	case "report":
 		return cmdBackupReport(args[1:])
+	case "restore":
+		return cmdBackupRestore(args[1:])
 	default:
-		return fmt.Errorf("未知 backup 子命令: %s（可用 run|list|verify|prune|clean|report）", args[0])
+		return fmt.Errorf("未知 backup 子命令: %s（可用 run|list|verify|prune|clean|report|restore）", args[0])
 	}
 }
 
@@ -498,6 +500,145 @@ func cmdBackupReport(args []string) error {
 		fmt.Fprintln(os.Stderr, "  [警告]", e)
 	}
 	return nil
+}
+
+// cmdBackupRestore 从现场备份包恢复应用：
+// 停应用 → 变更前自动备份 → 解压恢复 → 修正属主 → 启动应用 → 健康检查。
+// 默认 dry-run，--yes 才执行；任一步失败即停并列出已执行步骤。
+func cmdBackupRestore(args []string) error {
+	fs := flag.NewFlagSet("backup restore", flag.ExitOnError)
+	cfgPath := fs.String("c", "config.yaml", "配置文件")
+	appName := fs.String("app", "", "要恢复的应用名（必须在 webs 中）")
+	file := fs.String("file", "", "远端备份包路径（backup.root 下 eops-*.tar.gz）")
+	dryRun := fs.Bool("dry-run", false, "只出恢复计划不执行")
+	yes := fs.Bool("yes", false, "确认执行恢复")
+	fs.Parse(args)
+
+	if strings.TrimSpace(*appName) == "" {
+		return fmt.Errorf("必须用 --app 指定应用")
+	}
+	if strings.TrimSpace(*file) == "" {
+		return fmt.Errorf("必须用 --file 指定远端备份包路径")
+	}
+
+	cfg, err := config.Load(*cfgPath)
+	if err != nil {
+		return err
+	}
+	if err := gateValidation(cfg, *yes); err != nil {
+		return err
+	}
+	app := cfg.AppByName(*appName)
+	if app == nil {
+		return fmt.Errorf("应用 %q 不存在于 webs（可用应用见 config.yaml）", *appName)
+	}
+
+	root := cfg.Backup.EffectiveRoot()
+	t, ok := backup.FindRestoreTarget(backup.Targets(cfg), *appName, *file)
+	if !ok {
+		return fmt.Errorf("备份包 %s 不属于应用 %s 的任何主机（文件名应为 %s<应用>-<主机>-<时间>.tar.gz）",
+			*file, *appName, config.BackupFilePrefix)
+	}
+	plan, err := backup.BuildRestorePlan(root, t, *file, time.Now())
+	if err != nil {
+		return err
+	}
+
+	fmt.Print(plan.Text())
+	dry := *dryRun || !*yes
+	if dry {
+		fmt.Println("\n（dry-run，未执行恢复；确认后加 --yes 执行）")
+		return nil
+	}
+
+	budget := restoreHealthBudget(cfg, app)
+	dial := &execDialer{cfg: cfg, over: sshOverride()}
+	defer dial.Close()
+	c, err := dial.Dial(t.Host)
+	if err != nil {
+		return fmt.Errorf("%s SSH 连接失败: %w", t.Host.Host, err)
+	}
+
+	var executed []string
+	fail := func(name string, cause error) error {
+		fmt.Printf("\n❌ 「%s」失败: %v\n", name, cause)
+		if len(executed) > 0 {
+			fmt.Println("已执行步骤：")
+			for i, e := range executed {
+				fmt.Printf("  %d. %s\n", i+1, e)
+			}
+		} else {
+			fmt.Println("已执行步骤：无")
+		}
+		return fmt.Errorf("恢复中断于「%s」", name)
+	}
+
+	for _, step := range plan.Steps {
+		fmt.Printf("\n→ %s: %s\n", step.Name, step.Command)
+		out, rerr := c.Run(step.Command)
+		if rerr != nil {
+			return fail(step.Name, fmt.Errorf("%v（输出: %s）", rerr, oneLine(out)))
+		}
+		if step.Key == backup.StepPreBackup {
+			res := backup.ParseVerify(plan.PreBackup, out)
+			if !res.OK {
+				return fail(step.Name, fmt.Errorf("变更前备份校验失败: %s", res.Err))
+			}
+			fmt.Printf("   ✅ 变更前备份完成 %s  sha256=%s…\n", backup.HumanBytes(res.Bytes), shortHash(res.SHA256))
+		}
+		executed = append(executed, step.Name)
+	}
+
+	if plan.HealthEnabled {
+		fmt.Printf("\n→ 健康检查（预算 %s）: %s\n", budget, plan.HealthCommand)
+		ok, out := pollRestoreHealth(c, plan.HealthCommand, budget)
+		if !ok {
+			return fail("健康检查", fmt.Errorf("探测未通过（最后输出: %s）", oneLine(out)))
+		}
+		fmt.Println("   ✅ 健康检查通过")
+	}
+
+	fmt.Printf("\n✅ 恢复完成：%s @%s（备份包 %s）\n", plan.App, plan.Host, plan.Package)
+	return nil
+}
+
+// restoreCommandRunner 远端命令执行接口（execDialer.Dial 返回的 *sshx.Client 满足）。
+type restoreCommandRunner interface {
+	Run(string) (string, error)
+}
+
+// restoreHealthBudget 健康检查预算：tomcat 读 tomcat_check_minutes（默认 20），
+// jar 读 jar_check_minutes（默认 5）。
+func restoreHealthBudget(cfg *config.Config, app *config.App) time.Duration {
+	if app != nil && app.MiddleType == "tomcat" {
+		m := 20
+		if cfg.TomcatCheckMinutes > 0 {
+			m = cfg.TomcatCheckMinutes
+		}
+		return time.Duration(m) * time.Minute
+	}
+	m := 5
+	if cfg.JarCheckMinutes > 0 {
+		m = cfg.JarCheckMinutes
+	}
+	return time.Duration(m) * time.Minute
+}
+
+// pollRestoreHealth 每 10s 轮询只读健康探测命令，直到通过或预算耗尽。
+func pollRestoreHealth(c restoreCommandRunner, cmd string, budget time.Duration) (bool, string) {
+	deadline := time.Now().Add(budget)
+	var last string
+	for {
+		out, err := c.Run(cmd)
+		last = out
+		if err == nil {
+			return true, last
+		}
+		if time.Now().Add(10 * time.Second).After(deadline) {
+			return false, last
+		}
+		time.Sleep(10 * time.Second)
+	}
 }
 
 // mergeLedgers 按主机分别生成台账后合并（主机归属用实际连接的 host 兜底）。
