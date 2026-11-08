@@ -125,3 +125,24 @@ func TestValidateHealthMode(t *testing.T) {
 		t.Fatalf("应检出非法 health_mode: %+v", iss)
 	}
 }
+
+// 达梦备份段：凭据文件必填 + 必须有 dm 支持软件主机 + 模式名白名单。
+func TestValidateBackupDM(t *testing.T) {
+	c := baseCfg(baseApp())
+	c.Backup = &Backup{DMSchema: "SYSDBA"}
+	if iss := c.Validate(); !hasMsg(iss, "dm_credential_file") {
+		t.Fatalf("缺凭据文件应报错: %+v", iss)
+	}
+	c.Backup.DMCredentialFile = "/root/.dm.pass"
+	if iss := c.Validate(); !hasMsg(iss, "dm 类型的 supports") {
+		t.Fatalf("无 dm 主机应报错: %+v", iss)
+	}
+	c.Supports = []Support{{Kind: "dm", Hosts: []Host{{Host: "10.0.0.9"}}}}
+	if iss := c.Validate(); HasError(iss) {
+		t.Fatalf("完整 dm 段不应报错: %+v", iss)
+	}
+	c.Backup.DMSchema = "SYS;DBA"
+	if iss := c.Validate(); !hasMsg(iss, "dm_schema") {
+		t.Fatalf("模式名注入应报错: %+v", iss)
+	}
+}

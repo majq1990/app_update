@@ -43,45 +43,45 @@ var defaultSupportLogDirs = map[string][]string{
 	"nginx": {"/egova/apps/nginx/logs"},
 
 	// ---- oneinstall_v2 统一日志根 /egova/log/<name> ----
-	"mysql_log":    {"/egova/log/mysql"},       // mysqld.log / slow log
-	"redis_log":    {"/egova/log/redis"},       // redis.log
-	"nginx_log":    {"/egova/log/nginx"},       // access.log / error.log（openresty 同源）
-	"zookeeper":    {"/egova/log/zookeeper"},
-	"tdengine":     {"/egova/log/TDengine"},    // taosdlog.0 按序滚动
-	"tdengine3":    {"/egova/log/TDengine3"},
-	"proxysql":     {"/egova/log/proxysql"},
-	"postgres":     {"/egova/pgsql/log"},       // pg_log 常见别名见 cleanPatternsFor
-	"kafka":        {"/egova/data/kafka"},      // kafka log_path=data 根下（server.log 等）
+	"mysql_log":     {"/egova/log/mysql"}, // mysqld.log / slow log
+	"redis_log":     {"/egova/log/redis"}, // redis.log
+	"nginx_log":     {"/egova/log/nginx"}, // access.log / error.log（openresty 同源）
+	"zookeeper":     {"/egova/log/zookeeper"},
+	"tdengine":      {"/egova/log/TDengine"}, // taosdlog.0 按序滚动
+	"tdengine3":     {"/egova/log/TDengine3"},
+	"proxysql":      {"/egova/log/proxysql"},
+	"postgres":      {"/egova/pgsql/log"},  // pg_log 常见别名见 cleanPatternsFor
+	"kafka":         {"/egova/data/kafka"}, // kafka log_path=data 根下（server.log 等）
 	"elasticsearch": {"/egova/data/elasticsearch/logs"},
-	"nacos":        {"/egova/nacos/standalone-logs"},
-	"minio":        {"/egova/data/minio"},
-	"docker":       {"/var/lib/docker/containers"}, // json-file 驱动逐容器目录
-	"cetus":        {"/egova/log/cetus"},       // oneops 监控套件同源路径
-	"onlyoffice":   {"/var/log/onlyoffice"},    // documentserver
-	"openresty":    {"/egova/log/nginx"},       // 与 nginx 同路径（别名）
+	"nacos":         {"/egova/nacos/standalone-logs"},
+	"minio":         {"/egova/data/minio"},
+	"docker":        {"/var/lib/docker/containers"}, // json-file 驱动逐容器目录
+	"cetus":         {"/egova/log/cetus"},           // oneops 监控套件同源路径
+	"onlyoffice":    {"/var/log/onlyoffice"},        // documentserver
+	"openresty":     {"/egova/log/nginx"},           // 与 nginx 同路径（别名）
 }
 
 // SupportKindAliases kind 别名归一（Excel 手填等价写法 → 规范 kind）。
 // 便于工程同事按习惯写法填写，导入侧统一收敛。
 var SupportKindAliases = map[string]string{
-	"达梦":          "dm",
-	"mysql-server": "mysql",
-	"mysql_server": "mysql",
-	"mysqlclient":  "mysql", // client 不产慢日志，但目录约定一致
-	"percona":      "mysql",
-	"mydumper":     "mysql",
-	"pgsql":        "postgres",
-	"postgresql":   "postgres",
-	"pg":           "postgres",
-	"postgis":      "postgres",
-	"tdengine2":    "tdengine",
-	"td2":          "tdengine",
-	"td3":          "tdengine3",
-	"es":           "elasticsearch",
-	"zk":           "zookeeper",
-	"minio":        "minio",
-	"rs":           "rustfs",
-	"openresty":    "nginx",
+	"达梦":               "dm",
+	"mysql-server":     "mysql",
+	"mysql_server":     "mysql",
+	"mysqlclient":      "mysql", // client 不产慢日志，但目录约定一致
+	"percona":          "mysql",
+	"mydumper":         "mysql",
+	"pgsql":            "postgres",
+	"postgresql":       "postgres",
+	"pg":               "postgres",
+	"postgis":          "postgres",
+	"tdengine2":        "tdengine",
+	"td2":              "tdengine",
+	"td3":              "tdengine3",
+	"es":               "elasticsearch",
+	"zk":               "zookeeper",
+	"minio":            "minio",
+	"rs":               "rustfs",
+	"openresty":        "nginx",
 	"nginx(openresty)": "nginx",
 }
 

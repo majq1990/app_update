@@ -52,7 +52,7 @@ func (s backupSel) apply(ts []backup.Target) []backup.Target {
 	var out []backup.Target
 	for _, t := range ts {
 		switch t.Kind {
-		case backup.KindMySQL:
+		case backup.KindMySQL, backup.KindDM:
 			if s.mysql {
 				out = append(out, t)
 			}
@@ -81,7 +81,7 @@ func cmdBackupRun(args []string) error {
 	fs := flag.NewFlagSet("backup run", flag.ExitOnError)
 	cfgPath := fs.String("c", "config.yaml", "配置文件")
 	app := fs.String("app", "all", "备份范围：应用名（all=全部，逗号分隔多个）")
-	mysql := fs.Bool("mysql", false, "同时执行数据库逻辑备份（需配置 backup.databases）")
+	mysql := fs.Bool("mysql", false, "同时执行数据库逻辑备份（mysql: backup.databases；达梦: backup.dm_schema）")
 	noReg := fs.Bool("no-register-zabbix", false, "不把备份目录登记进 zabbix 备份目录监控清单")
 	dryRun := fs.Bool("dry-run", false, "只出计划不执行")
 	yes := fs.Bool("yes", false, "确认执行备份")
@@ -172,6 +172,10 @@ func backupCommand(cfg *config.Config, t backup.Target, dest string) (string, er
 	if t.Kind == backup.KindMySQL {
 		b := cfg.Backup
 		return backup.DumpCommand(dest, t.Bases, b.EffectiveDumpUser(), b.DumpDefaultsFile)
+	}
+	if t.Kind == backup.KindDM {
+		b := cfg.Backup
+		return backup.DMCommand(dest, t.Bases[0], b.DMCredentialFile)
 	}
 	return backup.TarCommand(dest, t.Path, t.Exclude)
 }

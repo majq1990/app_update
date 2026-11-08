@@ -166,6 +166,77 @@ func TestDumpCommand(t *testing.T) {
 	}
 }
 
+func TestDMCommand(t *testing.T) {
+	dest := "/egova/backup/2026-11-08/eops-dm-10.0.0.5-101530.dmp.gz"
+	cmd, err := DMCommand(dest, "SYSDBA", "/root/.dm.pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"set -o pipefail",
+		"umask 077",
+		"dexp PARFILE=",
+		"SCHEMAS=SYSDBA\\n",
+		"USERID=$cred\\n",
+		"rm -f " + quoteForTest(dest+".par"),
+		"gzip -1 -f",
+		"sha256sum '" + dest + "'",
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("dexp 命令缺少 %q\n实际: %s", want, cmd)
+		}
+	}
+	// 口令红线：凭据文件路径只能以 $(cat …) 读入，绝不内联进命令
+	if strings.Contains(cmd, "password") || strings.Contains(cmd, "USER/密码@") {
+		t.Errorf("命令不应包含口令内容: %s", cmd)
+	}
+	// PARFILE 内的值不得带 shell 引号（dexp 按字面量读取）；
+	// printf 格式串自身的起始引号紧邻 FILE=，故只检查值侧
+	if strings.Contains(cmd, "SCHEMAS='") || strings.Contains(cmd, "LOG='") {
+		t.Errorf("PARFILE 值不应带 shell 引号: %s", cmd)
+	}
+}
+
+func TestDMCommandRejects(t *testing.T) {
+	cases := []struct {
+		dest, schema, cred string
+	}{
+		{"relative/x.dmp.gz", "SYSDBA", "/root/.dm.pass"},           // dest 非绝对路径
+		{"/egova/backup/x.dmp.gz", "SYS;DBA", "/root/.dm.pass"},     // 模式名注入
+		{"/egova/backup/x.dmp.gz", "SYSDBA", "/root/.dm$(id).pass"}, // 凭据文件注入
+	}
+	for i, c := range cases {
+		if _, err := DMCommand(c.dest, c.schema, c.cred); err == nil {
+			t.Errorf("case %d 应被拒绝", i)
+		}
+	}
+}
+
+func TestTargetsDM(t *testing.T) {
+	sup := []config.Support{{Kind: "dm", Name: "达梦库", Hosts: []config.Host{{Host: "10.0.0.5"}, {Host: "10.0.0.6"}}}}
+	// 未配 dm_schema：无 dm 目标
+	for _, x := range Targets(cfgWith(&config.Backup{Databases: []string{"a"}}, nil, sup)) {
+		if x.Kind == KindDM {
+			t.Fatal("未配 dm_schema 不应产生 dm 目标")
+		}
+	}
+	ts := Targets(cfgWith(&config.Backup{DMSchema: "SYSDBA"}, nil, sup))
+	var dms []Target
+	for _, x := range ts {
+		if x.Kind == KindDM {
+			dms = append(dms, x)
+		}
+	}
+	if len(dms) != 2 {
+		t.Fatalf("dm 目标应为主机数 2，实际 %d", len(dms))
+	}
+	if dms[0].Bases[0] != "SYSDBA" || dms[0].Slug == "" {
+		t.Fatalf("dm 目标字段不合规: %+v", dms[0])
+	}
+}
+
+func quoteForTest(s string) string { return "'" + s + "'" }
+
 func TestVerifyCommandByExtension(t *testing.T) {
 	tarCmd, err := VerifyCommand("/egova/backup/a.tar.gz")
 	if err != nil {

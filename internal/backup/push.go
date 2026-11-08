@@ -4,7 +4,7 @@ package backup
 //
 // 工具只读现场台账、只产出 JSON，不联网：真实写行由上层用 ztoa MCP 执行。
 // controlId 与 worksheet 6878e909d26faff4cc8c2c3e 的 schema 一一对应，
-// 备份日期/间隔由台账里 kind=app / kind=mysql 的最新 ModTime 计算。
+// 备份日期/间隔由台账里应用域（kind=app）与数据库域（kind=mysql/dm）的最新 ModTime 计算。
 
 import (
 	"encoding/json"
@@ -69,7 +69,7 @@ func BuildPushPayload(led Ledger, meta PushMeta, now time.Time) (PushPayload, er
 			if !hasApp || t.After(latestApp) {
 				latestApp, hasApp = t, true
 			}
-		case KindMySQL:
+		case KindMySQL, KindDM:
 			if !hasDB || t.After(latestDB) {
 				latestDB, hasDB = t, true
 			}

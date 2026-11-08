@@ -208,6 +208,13 @@ type Backup struct {
 	// DumpDefaultsFile 凭据文件（如 /root/.my.cnf）；空 = 依赖 mysqldump 默认读取。
 	// 工具不保存数据库口令：凭据由现场文件持有，避免口令进入配置与命令行。
 	DumpDefaultsFile string `yaml:"dump_defaults_file,omitempty"`
+	// DMSchema 达梦逻辑备份（dexp）的 SCHEMAS 名；空 = 不做达梦备份。
+	// 模式名会进远端命令，按 [A-Za-z0-9_$.-] 白名单校验。
+	DMSchema string `yaml:"dm_schema,omitempty"`
+	// DMCredentialFile 达梦凭据文件（远端绝对路径，内容一行 USER/密码@host:port，权限 600）。
+	// dexp 以 PARFILE 方式执行：口令只在远端临时参数文件里（umask 077，用完即删），
+	// 不进配置、不进命令行、不出现在进程列表。
+	DMCredentialFile string `yaml:"dm_credential_file,omitempty"`
 	// Exclude 打包排除（相对应用部署根，tar 通配）。默认会追加 logs/ 与更新期 backups/。
 	Exclude []string `yaml:"exclude,omitempty"`
 }

@@ -335,6 +335,29 @@ func (c *Config) validateBackup() []Issue {
 				"backup.databases 非空但没有 mysql 类型的 supports 段（mysqldump 无目标主机）"})
 		}
 	}
+	// 达梦段：模式名白名单 + 凭据文件远端绝对路径 + 必须有 dm 支持软件主机
+	if s := strings.TrimSpace(b.DMSchema); s != "" {
+		if !sqlNameSafe(s) {
+			issues = append(issues, Issue{"error", w,
+				fmt.Sprintf("dm_schema 含非法模式名: %q（只允许字母数字_$.-）", s)})
+		}
+		f := strings.TrimSpace(b.DMCredentialFile)
+		if f == "" || !strings.HasPrefix(f, "/") || !pathSafe(f) {
+			issues = append(issues, Issue{"error", w,
+				fmt.Sprintf("dm_credential_file 必须是不含特殊字符的远端绝对路径（凭据文件内容一行 USER/密码@host:port）: %q", f)})
+		}
+		found := false
+		for _, sp := range c.Supports {
+			if sp.Kind == "dm" && len(sp.Hosts) > 0 {
+				found = true
+				break
+			}
+		}
+		if !found {
+			issues = append(issues, Issue{"error", w,
+				"backup.dm_schema 非空但没有 dm 类型的 supports 段（dexp 无目标主机）"})
+		}
+	}
 	return issues
 }
 

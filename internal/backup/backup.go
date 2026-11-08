@@ -27,6 +27,7 @@ const (
 	KindApp   Kind = "app"   // 应用部署目录打包
 	KindDir   Kind = "dir"   // 支持软件指定目录打包
 	KindMySQL Kind = "mysql" // mysqldump 逻辑备份
+	KindDM    Kind = "dm"    // 达梦 dexp 逻辑备份
 )
 
 // Target 一个备份目标（应用单主机 / 支持软件单主机单路径 / 数据库单主机）。
@@ -35,7 +36,7 @@ type Target struct {
 	Name    string // 显示名（应用名 / 支持软件名）
 	Host    config.Host
 	Path    string   // app/dir：源绝对路径；mysql：空
-	Bases   []string // mysql：库名列表
+	Bases   []string // mysql：库名列表；dm：单元素模式名
 	Exclude []string // app/dir：相对 Path 的排除通配（不含 basename 前缀，构建时补）
 	Slug    string   // 文件名中的稳定标识（应用名/支持软件名+目录名）
 }
@@ -46,7 +47,8 @@ var baseExcludes = []string{"logs/*", "log/*", "backups/*", "*.log"}
 // Targets 从配置展开全部备份目标。
 //   - webs：每个应用在每个主机群组各一个目录目标（web_path）；
 //   - supports：BackupPaths 逐路径展开（redis 的 dump.rdb、nginx 的 conf 等）；
-//   - mysql：配了 backup.databases 时，在 mysql 支持软件主机的每个主机上各一个库目标。
+//   - mysql：配了 backup.databases 时，在 mysql 支持软件主机的每个主机上各一个库目标；
+//   - dm：配了 backup.dm_schema 时，在达梦支持软件主机的每个主机上各一个模式目标。
 func Targets(c *config.Config) []Target {
 	var out []Target
 	seen := map[string]bool{} // 同主机同路径只备一次（应用跨群组常见）
@@ -138,6 +140,35 @@ func Targets(c *config.Config) []Target {
 			}
 		}
 	}
+
+	// dm：配了 backup.dm_schema 时，在达梦支持软件主机的每个主机上各一个模式目标
+	if c.Backup != nil && c.Backup.DMSchema != "" {
+		for i := range c.Supports {
+			s := &c.Supports[i]
+			if s.Kind != "dm" {
+				continue
+			}
+			name := s.Name
+			if name == "" {
+				name = "dm"
+			}
+			for _, h := range s.Hosts {
+				if h.Host == "" {
+					continue
+				}
+				key := h.Host + "\x00dm"
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+				out = append(out, Target{
+					Kind: KindDM, Name: name, Host: h,
+					Bases: []string{c.Backup.DMSchema},
+					Slug:  slugFor(name, "dm"),
+				})
+			}
+		}
+	}
 	return out
 }
 
@@ -201,8 +232,11 @@ func TargetPrefix(t Target) string {
 // 带时分秒避免同日多次执行互相覆盖。
 func ArchiveName(t Target, now time.Time) string {
 	ext := ".tar.gz"
-	if t.Kind == KindMySQL {
+	switch t.Kind {
+	case KindMySQL:
 		ext = ".sql.gz"
+	case KindDM:
+		ext = ".dmp.gz"
 	}
 	return TargetPrefix(t) + now.Format("150405") + ext
 }
@@ -342,6 +376,59 @@ func DumpCommand(dest string, dbs []string, user, defaultsFile string) (string, 
 			"--default-character-set=utf8mb4%s -u %s --databases %s | gzip -1 > %s && mv -f %s %s && sha256sum %s && stat -c %%s %s",
 		dirQ, credOpt, userQ, strings.Join(dbArgs, " "), partQ,
 		partQ, destQ, destQ, destQ,
+	), nil
+}
+
+// DMCommand 构建达梦 dexp 命令（SCHEMAS 级逻辑备份，产物 gzip 压缩）。
+// 口令不进命令行：凭据从现场文件（credFile，内容一行 USER/密码@host:port）读入
+// 临时 PARFILE（umask 077，执行完即删），ps 与历史都看不到口令。
+// 成功判定用 rc 与产物双重校验：dexp 个别错误 rc=0，必须看 .dmp 非空。
+func DMCommand(dest, schema, credFile string) (string, error) {
+	if !pathOK(dest) {
+		return "", fmt.Errorf("备份目标路径非法: %q", dest)
+	}
+	if !sqlIdentOK(schema) {
+		return "", fmt.Errorf("达梦模式名非法: %q", schema)
+	}
+	if !pathOK(credFile) {
+		return "", fmt.Errorf("凭据文件路径非法: %q", credFile)
+	}
+	dirQ, err := quote(path.Dir(dest))
+	if err != nil {
+		return "", err
+	}
+	base := path.Base(dest) // eops-<slug>-<host>-150405.dmp.gz
+	dmp := strings.TrimSuffix(base, ".gz")
+	logName := strings.TrimSuffix(base, ".dmp.gz") + ".log"
+	partQ, err := quote(dest + ".par")
+	if err != nil {
+		return "", err
+	}
+	credQ, err := quote(credFile)
+	if err != nil {
+		return "", err
+	}
+	dmpQ, err := quote(dmp)
+	if err != nil {
+		return "", err
+	}
+	destQ, err := quote(dest)
+	if err != nil {
+		return "", err
+	}
+	// dexp 产物落 DIRECTORY（已 cd 进该目录，FILE 用相对名）；成功后 gzip -1 得最终 .dmp.gz。
+	// printf 的 %s 参数不经过 shell 二次解释，PARFILE 内的值用原始名（不带 shell 引号）；
+	// schema 已过 sqlIdentOK 白名单，dmp/log/dir 为本工具自构文件名，$cred 为运行时变量。
+	return fmt.Sprintf(
+		"set -o pipefail; mkdir -p %s && cd %s && umask 077 && "+
+			"cred=$(cat %s) || exit 2; "+
+			"printf 'FILE=%s\\nLOG=%s\\nSCHEMAS=%s\\nDIRECTORY=%s\\nUSERID=%s\\n' > %s && "+
+			"dexp PARFILE=%s >/dev/null 2>&1; rc=$?; rm -f %s; "+
+			"if [ $rc -ne 0 ] || [ ! -s %s ]; then echo 达梦导出失败 rc=$rc >&2; exit ${rc:-1}; fi; "+
+			"gzip -1 -f %s && sha256sum %s && stat -c %%s %s",
+		dirQ, dirQ, credQ,
+		dmp, logName, schema, path.Dir(dest), "$cred",
+		partQ, partQ, partQ, dmpQ, dmpQ, destQ, destQ,
 	), nil
 }
 

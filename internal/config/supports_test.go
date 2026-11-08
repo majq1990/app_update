@@ -150,12 +150,12 @@ supports:
 
 	wants := map[string]string{
 		"PostgreSQL": "postgres",
-		"达梦":          "dm",
-		"ES":          "elasticsearch",
-		"zk":          "zookeeper",
-		"td2":         "tdengine",
-		"td3":         "tdengine3",
-		"openresty":   "nginx",
+		"达梦":         "dm",
+		"ES":         "elasticsearch",
+		"zk":         "zookeeper",
+		"td2":        "tdengine",
+		"td3":        "tdengine3",
+		"openresty":  "nginx",
 	}
 	for orig, want := range wants {
 		if got := NormalizeSupportKind(orig); got != want {
@@ -169,15 +169,15 @@ supports:
 	}
 	dirWants := map[string]string{
 		"postgres":      "/egova/pgsql/log",
-		"kafka":          "/egova/data/kafka",
-		"elasticsearch":  "/egova/data/elasticsearch/logs",
-		"zookeeper":      "/egova/log/zookeeper",
-		"tdengine":       "/egova/log/TDengine",
-		"tdengine3":      "/egova/log/TDengine3",
-		"nacos":          "/egova/nacos/standalone-logs",
-		"docker":         "/var/lib/docker/containers",
-		"proxysql":       "/egova/log/proxysql",
-		"onlyoffice":     "/var/log/onlyoffice",
+		"kafka":         "/egova/data/kafka",
+		"elasticsearch": "/egova/data/elasticsearch/logs",
+		"zookeeper":     "/egova/log/zookeeper",
+		"tdengine":      "/egova/log/TDengine",
+		"tdengine3":     "/egova/log/TDengine3",
+		"nacos":         "/egova/nacos/standalone-logs",
+		"docker":        "/var/lib/docker/containers",
+		"proxysql":      "/egova/log/proxysql",
+		"onlyoffice":    "/var/log/onlyoffice",
 	}
 	for kind, wantDir := range dirWants {
 		s := byKind[kind]
