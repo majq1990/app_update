@@ -186,6 +186,35 @@ func TestRunnerAggregatesAndSorts(t *testing.T) {
 	}
 }
 
+func TestHostScopedChecksDedupPerHost(t *testing.T) {
+	// 两个应用在同一主机：OS/安全类只应各跑一次，中间件类按应用各跑一次
+	var infoCmd string
+	for _, c := range Checks() {
+		if c.Name == "os-info" {
+			if !c.HostScoped {
+				t.Fatal("os 维度检查应自动标记 HostScoped")
+			}
+			infoCmd, _ = c.Command(Env{})
+		}
+		if c.Name == "ssh-policy" && !c.HostScoped {
+			t.Fatal("security 维度检查应自动标记 HostScoped")
+		}
+	}
+	conn := fakeConn{byCmd: map[string]string{infoCmd: "Kylin V10\n4.19\nup 1 day\n"}}
+	r := Runner{Dial: func(config.Host) (Conn, error) { return conn, nil }, Parallel: 2}
+	targets := []Target{
+		{Host: config.Host{Host: "10.0.0.1"}, App: "appA"},
+		{Host: config.Host{Host: "10.0.0.1"}, App: "appB"},
+	}
+	res := r.Run(&config.Config{}, targets, []Check{checkByName(t, "os-info")})
+	if len(res) != 1 {
+		t.Fatalf("同主机两个应用，主机级检查应只跑 1 次，实际 %d", len(res))
+	}
+	if res[0].Target != "10.0.0.1" {
+		t.Fatalf("主机级检查不应挂应用标签: %q", res[0].Target)
+	}
+}
+
 func TestTargetsDedup(t *testing.T) {
 	cfg := &config.Config{
 		Webs: []config.App{{

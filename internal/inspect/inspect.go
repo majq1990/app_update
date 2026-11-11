@@ -144,12 +144,15 @@ type Env struct {
 
 // Check 一个检查项。
 //   - Applies 决定该目标是否需要跑本检查；
+//   - HostScoped 表示主机级检查（OS/安全）：同一主机只跑一次，
+//     不随应用目标重复（实弹发现：7 个应用会各自报一遍 sshd/sudoers）；
 //   - Command 返回只读远端命令；
 //   - Evaluate 解析输出，产出指标与异常（纯函数，便于单测）。
 type Check struct {
 	Name        string
 	Dimension   Dimension
 	Description string
+	HostScoped  bool
 	Applies     func(Env) bool
 	Command     func(Env) (string, error)
 	Evaluate    func(Env, string) ([]Metric, []Finding, error)
@@ -159,7 +162,14 @@ type Check struct {
 var registry []Check
 
 // register 由各 checks_*.go 在 init 中登记。
-func register(c Check) { registry = append(registry, c) }
+// 规则：os / security 维度天然是主机级检查，统一标记 HostScoped，
+// 由 Runner 按主机去重（实弹教训：18 个应用会把 sshd/sudoers 重复报 18 遍）。
+func register(c Check) {
+	if c.Dimension == DimOS || c.Dimension == DimSecurity {
+		c.HostScoped = true
+	}
+	registry = append(registry, c)
+}
 
 // Checks 返回全部检查项（按维度、名称排序）。
 func Checks() []Check {
@@ -229,17 +239,28 @@ func (r Runner) Run(cfg *config.Config, targets []Target, checks []Check) []Resu
 		par = 4
 	}
 	type job struct {
-		t Target
-		c Check
+		t          Target
+		c          Check
+		hostScoped bool
 	}
 	var jobs []job
+	seenHostCheck := map[string]bool{}
 	for _, t := range targets {
 		env := Env{Target: t, Cfg: cfg}
 		for _, c := range checks {
 			if c.Applies != nil && !c.Applies(env) {
 				continue
 			}
-			jobs = append(jobs, job{t: t, c: c})
+			hostScoped := c.HostScoped
+			if hostScoped {
+				// 主机级检查（OS/安全）同主机只跑一次，避免按应用重复报告
+				key := t.Host.Host + "\x00" + c.Name
+				if seenHostCheck[key] {
+					continue
+				}
+				seenHostCheck[key] = true
+			}
+			jobs = append(jobs, job{t: t, c: c, hostScoped: hostScoped})
 		}
 	}
 
@@ -275,7 +296,7 @@ func (r Runner) Run(cfg *config.Config, targets []Target, checks []Check) []Resu
 				})
 			} else {
 				for _, j := range js {
-					local = append(local, runOne(conn, Env{Target: j.t, Cfg: cfg}, j.c))
+					local = append(local, runOneScoped(conn, Env{Target: j.t, Cfg: cfg}, j.c, j.hostScoped))
 				}
 			}
 			mu.Lock()
@@ -297,10 +318,15 @@ func (r Runner) Run(cfg *config.Config, targets []Target, checks []Check) []Resu
 	return results
 }
 
-// runOne 执行单个检查（命令构建失败/执行失败都转成 Err，不中断整轮）。
-func runOne(conn Conn, env Env, c Check) Result {
+// runOneScoped 执行单个检查（命令构建失败/执行失败都转成 Err，不中断整轮）。
+// hostScoped=true 时结果归属到主机（Target 显示为 IP），不挂某个应用标签。
+func runOneScoped(conn Conn, env Env, c Check, hostScoped bool) Result {
+	target := env.Target.Label()
+	if hostScoped {
+		target = env.Target.Host.Host
+	}
 	res := Result{
-		Host: env.Target.Host.Host, Target: env.Target.Label(),
+		Host: env.Target.Host.Host, Target: target,
 		Check: c.Name, Dimension: string(c.Dimension),
 	}
 	if c.Command == nil || c.Evaluate == nil {
@@ -327,7 +353,7 @@ func runOne(conn Conn, env Env, c Check) Result {
 	res.Metrics = metrics
 	for i := range findings {
 		findings[i].Host = env.Target.Host.Host
-		findings[i].Target = env.Target.Label()
+		findings[i].Target = target
 		findings[i].Check = c.Name
 		findings[i].Dimension = string(c.Dimension)
 		if findings[i].Severity == "" {
