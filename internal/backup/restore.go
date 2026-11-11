@@ -97,13 +97,15 @@ func ServiceCommand(raw string) (string, error) {
 	return raw, nil
 }
 
-// PreRestorePath 变更前自动备份路径：<root>/pre-restore-<ts>.tar.gz。
+// PreRestorePath 变更前自动备份路径：<root>/eops-pre-restore-<ts>.tar.gz。
+// 必须带 eops- 前缀：list/verify/prune 只认该前缀，否则变更前备份永远不会被
+// 纳入保留期清理（实弹发现：pre-restore-* 会无限累积）。
 func PreRestorePath(root string, now time.Time) (string, error) {
 	root = strings.TrimRight(strings.TrimSpace(root), "/")
 	if !pathOK(root) {
 		return "", fmt.Errorf("备份根目录非法: %q", root)
 	}
-	p := root + "/pre-restore-" + now.Format("20060102-150405") + ".tar.gz"
+	p := root + "/" + config.BackupFilePrefix + "pre-restore-" + now.Format("20060102-150405") + ".tar.gz"
 	if !pathOK(p) {
 		return "", fmt.Errorf("变更前备份路径非法: %q", p)
 	}

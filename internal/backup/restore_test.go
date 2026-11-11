@@ -69,12 +69,12 @@ func TestRestoreCommandBuilders(t *testing.T) {
 	if plan.Steps[4].Command != "systemctl start eurbanpro" {
 		t.Errorf("启动命令异常: %s", plan.Steps[4].Command)
 	}
-	if plan.PreBackup != "/egova/backup/pre-restore-20261107-120000.tar.gz" {
+	if plan.PreBackup != "/egova/backup/eops-pre-restore-20261107-120000.tar.gz" {
 		t.Errorf("变更前备份路径异常: %s", plan.PreBackup)
 	}
 	pre := plan.Steps[1].Command
 	for _, want := range []string{
-		"tar czf '/egova/backup/pre-restore-20261107-120000.tar.gz.part'",
+		"tar czf '/egova/backup/eops-pre-restore-20261107-120000.tar.gz.part'",
 		"-C '/egova/apps'",
 		"--exclude='eurbanpro/logs/*'",
 	} {
@@ -121,7 +121,7 @@ func TestRestorePlanText(t *testing.T) {
 	for _, want := range []string{
 		"恢复计划：应用 eurbanpro @10.0.0.1",
 		restoreGoodFile,
-		"/egova/backup/pre-restore-20261107-120000.tar.gz",
+		"/egova/backup/eops-pre-restore-20261107-120000.tar.gz",
 		"停止应用",
 		"变更前自动备份",
 		"解压恢复",

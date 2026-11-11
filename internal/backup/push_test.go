@@ -90,12 +90,14 @@ func TestBuildPushPayloadAppOnly(t *testing.T) {
 		m[ControlArea] != "四川区域" || m[ControlProjectManager] != "张三" {
 		t.Errorf("项目字段映射错误: %+v", m)
 	}
-	if m[ControlProvinceChief] != "" || m[ControlRegionChief] != "" || m[ControlDeliveryProject] != "" {
-		t.Errorf("成员/关联字段默认应为空: %+v", m)
+	for _, id := range []string{ControlProvinceChief, ControlRegionChief, ControlDeliveryProject} {
+		if _, ok := m[id]; ok {
+			t.Errorf("空值字段不应写入 payload: %s", id)
+		}
 	}
-	// 9 个项目字段 + 2 个应用备份字段
-	if len(p.Controls) != 11 {
-		t.Errorf("控件数应为 11，实际 %d: %+v", len(p.Controls), p.Controls)
+	// 空值字段不写（避免覆盖 ztoa 已有值）：项目名/大区/区域/项目经理/定级/状态 6 项 + 应用备份 2 项
+	if len(p.Controls) != 8 {
+		t.Errorf("控件数应为 8（空值省略），实际 %d: %+v", len(p.Controls), p.Controls)
 	}
 }
 
@@ -123,8 +125,9 @@ func TestBuildPushPayloadAppAndDB(t *testing.T) {
 	if got := m[ControlDBBackupGap]; got != "5" {
 		t.Errorf("数据库备份间隔错误: %q", got)
 	}
-	if len(p.Controls) != 13 {
-		t.Errorf("控件数应为 13，实际 %d", len(p.Controls))
+	// PushMeta 全空 → 只输出应用备份 2 项 + 数据库备份 2 项
+	if len(p.Controls) != 4 {
+		t.Errorf("控件数应为 4（空值省略），实际 %d", len(p.Controls))
 	}
 }
 
@@ -143,8 +146,8 @@ func TestBuildPushPayloadNoBackups(t *testing.T) {
 			t.Errorf("无备份时不应输出控件 %s", id)
 		}
 	}
-	if len(p.Controls) != 9 {
-		t.Errorf("无备份时只应输出 9 个项目字段，实际 %d", len(p.Controls))
+	if len(p.Controls) != 1 {
+		t.Errorf("无备份且只有一个项目名时只应输出 1 项（空值省略），实际 %d", len(p.Controls))
 	}
 	if m[ControlProjectName] != "p" {
 		t.Errorf("项目名称映射错误: %+v", m)
@@ -188,8 +191,9 @@ func TestPushPayloadJSONShape(t *testing.T) {
 	if err := json.Unmarshal(b, &doc); err != nil {
 		t.Fatalf("payload 不是合法 JSON: %v\n%s", err, b)
 	}
-	if len(doc.Controls) != 11 {
-		t.Fatalf("controls 数量错误: %d", len(doc.Controls))
+	// 仅项目名 + 应用备份日期/间隔 = 3 项
+	if len(doc.Controls) != 3 {
+		t.Fatalf("controls 数量错误（空值应省略）: %d", len(doc.Controls))
 	}
 	for _, c := range doc.Controls {
 		if c.ControlID == "" {

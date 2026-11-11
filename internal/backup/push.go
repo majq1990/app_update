@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -77,7 +78,11 @@ func BuildPushPayload(led Ledger, meta PushMeta, now time.Time) (PushPayload, er
 	}
 
 	p := PushPayload{Controls: make([]Control, 0, 13)}
+	// 只写非空值：空字符串写进 ztoa 会覆盖已有字段（实弹教训），宁可省略
 	add := func(id, value string) {
+		if strings.TrimSpace(value) == "" {
+			return
+		}
 		p.Controls = append(p.Controls, Control{ControlID: id, Value: value})
 	}
 
