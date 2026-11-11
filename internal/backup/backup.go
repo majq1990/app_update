@@ -532,7 +532,7 @@ func ListCommand(root string) (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf(
-		"find %s -type f \\( -name '%star.gz' -o -name '%ssql.gz' \\) -printf '%%T@|%%s|%%p\\n' 2>/dev/null | sort",
+		"find %s -type f \\( -name '%s*.tar.gz' -o -name '%s*.sql.gz' \\) -printf '%%T@|%%s|%%p\\n' 2>/dev/null | sort",
 		rQ, config.BackupFilePrefix, config.BackupFilePrefix), nil
 }
 
@@ -549,7 +549,7 @@ func PruneListCommand(root string, keepDays int) (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf(
-		"find %s -type f \\( -name '%star.gz' -o -name '%ssql.gz' \\) -mtime +%d -print 2>/dev/null | sort",
+		"find %s -type f \\( -name '%s*.tar.gz' -o -name '%s*.sql.gz' \\) -mtime +%d -print 2>/dev/null | sort",
 		rQ, config.BackupFilePrefix, config.BackupFilePrefix, keepDays), nil
 }
 

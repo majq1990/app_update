@@ -388,6 +388,28 @@ func TestRegisterBackupDirCommand(t *testing.T) {
 	}
 }
 
+// 回归：find 通配必须带 *（实弹 bug：写成 '%star.gz' 导致 find 匹配 eops-tar.gz，列取恒为空）
+func TestListCommandsGlob(t *testing.T) {
+	list, err := ListCommand("/egova/backup")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"'eops-*.tar.gz'", "'eops-*.sql.gz'", "-printf"} {
+		if !strings.Contains(list, want) {
+			t.Errorf("ListCommand 缺少 %q: %s", want, list)
+		}
+	}
+	prune, err := PruneListCommand("/egova/backup", 14)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"'eops-*.tar.gz'", "'eops-*.sql.gz'", "-mtime +14"} {
+		if !strings.Contains(prune, want) {
+			t.Errorf("PruneListCommand 缺少 %q: %s", want, prune)
+		}
+	}
+}
+
 func TestBackupValidation(t *testing.T) {
 	base := func(b *config.Backup) *config.Config {
 		return &config.Config{
