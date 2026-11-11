@@ -13,8 +13,9 @@ fi
 BUILD_TIME="$(date '+%Y-%m-%d %H:%M')"
 LDFLAGS="-s -w -X main.version=${VERSION} -X 'main.buildTime=${BUILD_TIME}'"
 
-rm -rf dist
+# 只清理构建产物，保留 dist/*.md（操作手册）
 mkdir -p dist
+find dist -maxdepth 1 -type f ! -name '*.md' -delete 2>/dev/null || true
 
 build() {
   local goos="$1" goarch="$2" out="$3"
