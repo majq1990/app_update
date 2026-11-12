@@ -17,7 +17,7 @@ import (
 
 func cmdHarden(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("用法: eops harden check|snippets|report -c config.yaml [选项]")
+		return fmt.Errorf("用法: eops harden check|snippets|report|sec -c config.yaml [选项]")
 	}
 	switch args[0] {
 	case "check":
@@ -26,8 +26,10 @@ func cmdHarden(args []string) error {
 		return cmdHardenCheck(args[1:], true)
 	case "report":
 		return cmdHardenReport(args[1:])
+	case "sec":
+		return cmdHardenSec(args[1:])
 	default:
-		return fmt.Errorf("未知 harden 子命令: %s（可用 check|snippets|report）", args[0])
+		return fmt.Errorf("未知 harden 子命令: %s（可用 check|snippets|report|sec）", args[0])
 	}
 }
 

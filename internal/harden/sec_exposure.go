@@ -120,7 +120,7 @@ func firstLine(s string) string {
 }
 
 // runExposureCheck 一次完整暴露面体检（主机级）。
-func runExposureCheck(host string, r *SecReport) {
+func RunExposureCheck(host string, r *SecReport) {
 	// 0) 采集受保护端口（egova-expose-ports 白名单）
 	protected := map[string]bool{}
 	if out, err := remoteRun(`ipset list -n 2>/dev/null | grep -q '^egova-expose-ports$' && ipset list egova-expose-ports 2>/dev/null | sed -n '6,40p' | awk '{print $1}' | grep -E '^[0-9]+$'`); err == nil {

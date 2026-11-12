@@ -96,6 +96,10 @@ const usage = `eops — 统一运维工具（应用更新/回滚 · 日志 · �
       输出可粘贴的加固片段（sshd/sysctl/防火墙），人工确认后执行
   eops harden report -c config.yaml [--out 台账.json]
       导出加固台账 JSON
+  eops harden sec check|fix|rollback|gap -c config.yaml [--host IP|all] [--yes] [--json 报告.json] [--manifest-out m.json]
+      安全工具箱（对齐 oneinstall_v2）：exposure 未授权探测 + nginx/tomcat 基线
+      check 只读体检；fix 默认 dry-run、--yes 执行（改前逐文件备份，nginx -t 失败自动还原）
+      rollback 按备份 manifest 回滚；gap 输出 oneinstall→eops 能力对照表
   eops version                          查看版本
 `
 

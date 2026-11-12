@@ -46,8 +46,8 @@ var currentHostValue string
 
 func currentHost() string { return currentHostValue }
 
-// setCurrentHost 绑定当前主机（CLI 层按主机循环调用）。
-func setCurrentHost(h string, fn func(string) (SecRunner, error)) {
+// SetCurrentHost 绑定当前主机与执行器（CLI 层按主机循环调用）。
+func SetCurrentHost(h string, fn func(string) (SecRunner, error)) {
 	currentHostValue = h
 	secRunner = fn
 }
@@ -58,8 +58,9 @@ type BackupEntry struct {
 	Backup string `json:"backup"`
 }
 
-// BackupRoot 远端备份根目录（对齐清单：/egova/security/backup/<ts>/）。
-const BackupRoot = "/egova/security/backup"
+// BackupRoot 远端备份根目录：/egova/eops-sec-backup/<host>/<ts>/...
+// （host 段用于 manifest 回滚时反查主机；CLI hostOfBackup 依赖该目录结构）。
+const BackupRoot = "/egova/eops-sec-backup"
 
 // ReportRoot 报告根目录。
 const ReportRoot = "/egova/security/report"
@@ -82,10 +83,10 @@ func backupFile(host, path string, r *SecReport) (string, error) {
 		return "", fmt.Errorf("路径非法: %q", path)
 	}
 	ts := secBackupTS()
-	remote := fmt.Sprintf("%s/%s%s", BackupRoot, ts, path)
+	remote := fmt.Sprintf("%s/%s/%s%s", BackupRoot, host, ts, path)
 	cmd := fmt.Sprintf(
 		`test -f %s || exit 0; mkdir -p %s && cp -a %s %s && echo COPIED`,
-		sq(path), sq(fmt.Sprintf("%s/%s", BackupRoot, ts)+dirOf(path)),
+		sq(path), sq(fmt.Sprintf("%s/%s/%s", BackupRoot, host, ts)+dirOf(path)),
 		sq(path), sq(remote))
 	out, err := remoteRun(cmd)
 	if err != nil {
