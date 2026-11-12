@@ -50,7 +50,7 @@ func TestKernelCveParser(t *testing.T) {
 	  "verdict": "VULNERABLE",
 	  "results": []
 	}`
-	ms, fs, err := parseKernelCveJSON("10.0.0.1", []byte(sample))
+	ms, fs, err := parseKernelCveJSON("10.0.0.1", DimSecurity, []byte(sample))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestKernelCveParser(t *testing.T) {
 	sampleOK := strings.Replace(sample, `"kernel_vuln_status": "VULNERABLE"`, `"kernel_vuln_status": "PATCHED"`, 1)
 	sampleOK = strings.Replace(sampleOK, `"vulnerable_count": 1,`, `"vulnerable_count": 0,`, 1)
 	sampleOK = strings.Replace(sampleOK, `"verdict": "VULNERABLE"`, `"verdict": "PATCHED"`, 1)
-	_, fs2, err := parseKernelCveJSON("10.0.0.1", []byte(sampleOK))
+	_, fs2, err := parseKernelCveJSON("10.0.0.1", DimSecurity, []byte(sampleOK))
 	if err != nil || len(fs2) != 0 {
 		t.Fatalf("已修复不应报: %+v %v", fs2, err)
 	}
@@ -77,7 +77,7 @@ func TestKernelCveParser(t *testing.T) {
 	sampleUn := strings.Replace(sample, `"kernel_vuln_status": "VULNERABLE"`, `"kernel_vuln_status": "UNKNOWN"`, 1)
 	sampleUn = strings.Replace(sampleUn, `"verdict": "VULNERABLE"`, `"verdict": "UNKNOWN"`, 1)
 	sampleUn = strings.Replace(sampleUn, `"vulnerable_count": 1,`, `"vulnerable_count": 0,`, 1)
-	_, fs3, _ := parseKernelCveJSON("10.0.0.1", []byte(sampleUn))
+	_, fs3, _ := parseKernelCveJSON("10.0.0.1", DimSecurity, []byte(sampleUn))
 	if len(fs3) != 1 || fs3[0].Severity != SevWarn {
 		t.Fatalf("UNKNOWN 应报 warn: %+v", fs3)
 	}
@@ -92,7 +92,7 @@ func TestVulnJarParser(t *testing.T) {
 		"    },\n" +
 		"    \"scan_time\": \"2026-11-12 10:00:00\"\n" +
 		"  }"
-	ms, fs, err := parseVulnJarJSON("10.0.0.1", []byte(out))
+	ms, fs, err := parseVulnJarJSON("10.0.0.1", DimSecurity, []byte(out))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestVulnJarParser(t *testing.T) {
 	}
 
 	zero := strings.Replace(out, `"total_vulnerabilities": 3`, `"total_vulnerabilities": 0`, 1)
-	_, fs2, _ := parseVulnJarJSON("10.0.0.1", []byte(zero))
+	_, fs2, _ := parseVulnJarJSON("10.0.0.1", DimSecurity, []byte(zero))
 	if len(fs2) != 0 {
 		t.Fatalf("0 漏洞不应报: %+v", fs2)
 	}

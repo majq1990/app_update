@@ -75,7 +75,7 @@ func TestParseLegacyTopicsEndToEnd(t *testing.T) {
 		]
 	}
 }` + "\n"
-	ms, fs, err := parseLegacyTopics("10.0.0.9", "ac-x", []byte(out))
+	ms, fs, err := parseLegacyTopics("10.0.0.9", "ac-x", DimSecurity, []byte(out))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestParseLegacyTopicsEndToEnd(t *testing.T) {
 
 // JSON 损坏时报错而非 panic
 func TestParseLegacyBrokenJSON(t *testing.T) {
-	if _, _, err := parseLegacyTopics("h", "c", []byte("not json at all")); err == nil {
+	if _, _, err := parseLegacyTopics("h", "c", DimSecurity, []byte("not json at all")); err == nil {
 		t.Fatal("坏 JSON 应返回错误")
 	}
 }

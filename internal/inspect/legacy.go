@@ -56,7 +56,7 @@ type legacyFinding struct {
 
 // parseLegacyTopics 解析 legacy topics JSON（容忍 SSH banner 等前缀噪声）。
 // 返回指标汇总与异常项。
-func parseLegacyTopics(host, typ string, data []byte) ([]Metric, []Finding, error) {
+func parseLegacyTopics(host, typ string, dim Dimension, data []byte) ([]Metric, []Finding, error) {
 	payload := extractJSON(data)
 	if payload == nil {
 		return nil, nil, fmt.Errorf("未找到 JSON 结果（可能输出被截断）")
@@ -96,7 +96,7 @@ func parseLegacyTopics(host, typ string, data []byte) ([]Metric, []Finding, erro
 			Host:      host,
 			Target:    host,
 			Check:     typ,
-			Dimension: string(DimSecurity),
+			Dimension: string(dim),
 			Severity:  sev,
 			Metric:    f.Metric,
 			Value:     fmt.Sprintf("%v", f.Value),

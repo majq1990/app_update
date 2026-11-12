@@ -1,13 +1,19 @@
 {
   "source": "gitlab.egova.com.cn:devops/auto-check",
   "commit": "29ddae45f69ad8072224f878b94e79e495d3dfe5",
-  "synced_at": "2026-11-12 11:27:43",
+  "synced_at": "2026-11-12 12:00:44",
   "files": {
     "security-port": {"sha256": "5ad50136786d08a4a9602f6e11878153671623dda8e4db8e9a594a4e998370c6"},
     "security-login": {"sha256": "e7f7b9986398783b511d0ba9e99f35a41b16f6c84aac014b1709767bc904608f"},
     "security-agent": {"sha256": "d64e87e9c36eed71611cf8584159034f267865a9391eb8279b72b380b87b2e1f"},
     "interface-interception": {"sha256": "3d097f353e54aab2957071de606a178b822536f0424ac299a8bae74372a341ae"},
     "kernel-cve": {"sha256": "b1749844930c84ebea9233fcfb55e513e498219cdae436a2e2a43d15196c3a1d"},
-    "vulnerable-jar": {"sha256": "8e9c4a2f7c96a7604094ba5fc2be02ac4b94ae9b99ef62ef0f7012835a17f5e9"}
+    "vulnerable-jar": {"sha256": "8e9c4a2f7c96a7604094ba5fc2be02ac4b94ae9b99ef62ef0f7012835a17f5e9"},
+    "os-check": {"sha256": "09c231e771e2f122da9acf54d6a613b5f0ab0ffa52130448b5844a3da102bf6d"},
+    "middleware": {"sha256": "b0e7f05047be50debbf1fdc64bfb264e2214fbc8658b502913ba1e345bac4f93"},
+    "check-script-jvm": {"sha256": "065dcdd2c80813b3ba2e0cf851a9de32593e0a852e0c9418ddd373926dbc0eeb"},
+    "check-threadpool-leak": {"sha256": "cb6d04fce07c1596cd72dc023493ffa4af08a1ce142dd9bc485d4b65fb0eae9f"},
+    "check-gis": {"sha256": "40762fd861326d072286cb68e1b1850e92e89a321ef433b2913f65823a7035e5"},
+    "check-geoserver": {"sha256": "e1c348a3b4ac0b24b70fd4fbc8d338fb63c79d0339b07624fd253b8ef62d2a2e"}
   }
 }

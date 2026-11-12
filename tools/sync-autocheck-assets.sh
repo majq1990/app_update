@@ -34,8 +34,9 @@ SYNC_AT="$(date '+%Y-%m-%d %H:%M:%S')"
 echo "    origin/master = $REV"
 
 echo "[2/4] 提取检查脚本（origin/master）..."
-# name → 上游路径
-MAP_NAME=(security-port security-login security-agent interface-interception kernel-cve vulnerable-jar)
+# name → 上游路径（每轮新增资产在此追加）
+MAP_NAME=(security-port security-login security-agent interface-interception kernel-cve vulnerable-jar \
+  os-check middleware check-script-jvm check-threadpool-leak check-gis check-geoserver)
 MAP_SRC=(
   "ansible/roles/security-port/files/check_port_security.sh"
   "ansible/roles/check_security_login/files/check_security_login.sh"
@@ -43,6 +44,12 @@ MAP_SRC=(
   "ansible/roles/check-interface_interception/files/check-interface_interception.sh"
   "ansible/roles/check-kernel-cve/files/check-kernel-cve.sh"
   "ansible/roles/security-vulnerable-jar/files/check_vulnerable_jar.py"
+  "ansible/roles/os-check/files/check_linux.sh"
+  "ansible/roles/middleware/files/check_middleware.sh"
+  "ansible/roles/check-script-jvm/files/check-script-jvm.sh"
+  "ansible/roles/check-threadpool-leak/files/check-threadpool-leak.sh"
+  "ansible/roles/check-gis/files/check-gis.sh"
+  "ansible/roles/check-geoserver/files/check-geoserver.sh"
 )
 
 declare -A SHA

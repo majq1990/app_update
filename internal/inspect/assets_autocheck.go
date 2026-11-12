@@ -40,6 +40,26 @@ var assetKernelCve []byte
 //go:embed assets/autocheck/vulnerable-jar.py
 var assetVulnerableJar []byte
 
+// —— 第二轮（2026-11-12）：os / 中间件 / 专项 ——
+
+//go:embed assets/autocheck/os-check.sh
+var assetOsCheck []byte
+
+//go:embed assets/autocheck/middleware.sh
+var assetMiddleware []byte
+
+//go:embed assets/autocheck/check-script-jvm.sh
+var assetCheckScriptJvm []byte
+
+//go:embed assets/autocheck/check-threadpool-leak.sh
+var assetThreadpoolLeak []byte
+
+//go:embed assets/autocheck/check-gis.sh
+var assetCheckGis []byte
+
+//go:embed assets/autocheck/check-geoserver.sh
+var assetCheckGeoserver []byte
+
 // assetScripts 资产名 → 脚本内容。
 var assetScripts = map[string][]byte{
 	"security-port.sh":          assetSecurityPort,
@@ -48,6 +68,12 @@ var assetScripts = map[string][]byte{
 	"interface-interception.sh": assetInterfaceInterception,
 	"kernel-cve.sh":             assetKernelCve,
 	"vulnerable-jar.py":         assetVulnerableJar,
+	"os-check.sh":               assetOsCheck,
+	"middleware.sh":             assetMiddleware,
+	"check-script-jvm.sh":       assetCheckScriptJvm,
+	"check-threadpool-leak.sh":  assetThreadpoolLeak,
+	"check-gis.sh":              assetCheckGis,
+	"check-geoserver.sh":        assetCheckGeoserver,
 }
 
 func assetScript(file string) ([]byte, bool) {
@@ -75,12 +101,16 @@ func acQ(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'
 
 // assetSpec 一项资产检查的定义。
 type assetSpec struct {
-	name    string // 检查名（ac- 前缀）
-	file    string // 资产文件名
-	desc    string
-	kind    string // legacy | kernelcve | vulnjar
-	applies func(Env) bool
-	args    func(Env) (string, error) // 解释器后的参数（可含配置派生路径）
+	name string // 检查名（ac- 前缀）
+	file string // 资产文件名
+	desc string
+	kind string    // legacy | kernelcve | vulnjar
+	dim  Dimension // 维度（空 = security；os/middleware 类按实际归属）
+	// hostScoped 主机级检查：os 类默认 true；带 applies 的按应用检查默认 false，
+	// middleware/jvm/threadpool 这类想按主机只跑一次的显式置 true。
+	hostScoped bool
+	applies    func(Env) bool
+	args       func(Env) (string, error) // 解释器后的参数（可含配置派生路径）
 }
 
 func assetChecks() []assetSpec {
@@ -120,17 +150,53 @@ func assetChecks() []assetSpec {
 				return "--scan-dirs " + acQ(wp) + " --no-containers", nil
 			},
 		},
+
+		// —— 第二轮：os / 中间件 / 专项（全部 legacy schema，主机级，维度归属如下）——
+		{
+			name: "ac-os-check", file: "os-check.sh", kind: "legacy", dim: DimOS,
+			desc: "OS 综合体检：系统/磁盘/内存/网络/时间（auto-check os-check）",
+		},
+		{
+			name: "ac-middleware", file: "middleware.sh", kind: "legacy", dim: DimMiddleware,
+			desc:       "Java 中间件体检：JVM 堆内存/http 线程（auto-check middleware）",
+			hostScoped: true,
+		},
+		{
+			name: "ac-jvm-spy", file: "check-script-jvm.sh", kind: "legacy", dim: DimMiddleware,
+			desc:       "JVM 诊断脚本就位检查（/egova/tools/script/spy_jvm.sh；auto-check check-script-jvm）",
+			hostScoped: true,
+		},
+		{
+			name: "ac-threadpool-leak", file: "check-threadpool-leak.sh", kind: "legacy", dim: DimMiddleware,
+			desc:       "线程池泄漏检查（auto-check check-threadpool-leak）",
+			hostScoped: true,
+		},
+		{
+			name: "ac-gis", file: "check-gis.sh", kind: "legacy", dim: DimMiddleware,
+			desc:    "GIS 服务专项检查（auto-check check-gis）",
+			applies: func(e Env) bool { return e.Target.App == "eUrbanGIS" },
+		},
+		{
+			name: "ac-geoserver", file: "check-geoserver.sh", kind: "legacy", dim: DimMiddleware,
+			desc:    "GeoServer 专项检查（auto-check check-geoserver）",
+			applies: func(e Env) bool { return e.Target.App == "eUrbanGIS" },
+		},
 	}
 }
 
 func init() {
 	for _, spec := range assetChecks() {
 		spec := spec
+		dim := spec.dim
+		if dim == "" {
+			dim = DimSecurity
+		}
 		register(Check{
 			Name:        spec.name,
-			Dimension:   DimSecurity,
+			Dimension:   dim,
 			Description: spec.desc,
 			Asset:       spec.file,
+			HostScoped:  spec.hostScoped,
 			Applies:     spec.applies,
 			Command: func(e Env) (string, error) {
 				interp := "bash"
@@ -153,11 +219,11 @@ func init() {
 			Evaluate: func(e Env, out string) ([]Metric, []Finding, error) {
 				switch spec.kind {
 				case "kernelcve":
-					return parseKernelCveJSON(e.Target.Host.Host, []byte(out))
+					return parseKernelCveJSON(e.Target.Host.Host, dim, []byte(out))
 				case "vulnjar":
-					return parseVulnJarJSON(e.Target.Host.Host, []byte(out))
+					return parseVulnJarJSON(e.Target.Host.Host, dim, []byte(out))
 				default:
-					return parseLegacyTopics(e.Target.Host.Host, spec.name, []byte(out))
+					return parseLegacyTopics(e.Target.Host.Host, spec.name, dim, []byte(out))
 				}
 			},
 		})
@@ -165,7 +231,7 @@ func init() {
 }
 
 // parseKernelCveJSON 解析 check-kernel-cve.sh --json 的扁平 schema。
-func parseKernelCveJSON(host string, data []byte) ([]Metric, []Finding, error) {
+func parseKernelCveJSON(host string, dim Dimension, data []byte) ([]Metric, []Finding, error) {
 	payload := extractJSON(data)
 	if payload == nil {
 		return nil, nil, fmt.Errorf("未找到 JSON 结果")
@@ -187,7 +253,7 @@ func parseKernelCveJSON(host string, data []byte) ([]Metric, []Finding, error) {
 	}
 	mk := func(sev Severity, msg string) []Finding {
 		return []Finding{{Host: host, Target: host, Check: "ac-kernel-cve",
-			Dimension: string(DimSecurity), Severity: sev, Metric: "kernel_vulnerable",
+			Dimension: string(dim), Severity: sev, Metric: "kernel_vulnerable",
 			Value:   fmt.Sprintf("%d/%d", int(vcount), len(strings.Split(doc["cve"].(string), ","))),
 			Message: msg}}
 	}
@@ -212,7 +278,7 @@ func boolOf(v any) bool {
 
 // parseVulnJarJSON 解析 check_vulnerable_jar.py 的扫描汇总。
 // 脚本 stdout 前若干行为进度文本，最后一个 JSON 对象才是结果。
-func parseVulnJarJSON(host string, data []byte) ([]Metric, []Finding, error) {
+func parseVulnJarJSON(host string, dim Dimension, data []byte) ([]Metric, []Finding, error) {
 	payload := extractJSON(data)
 	if payload == nil {
 		return nil, nil, fmt.Errorf("未找到 JSON 结果")
@@ -236,7 +302,7 @@ func parseVulnJarJSON(host string, data []byte) ([]Metric, []Finding, error) {
 	}
 	if total > 0 {
 		return ms, []Finding{{Host: host, Target: host, Check: "ac-vulnerable-jar",
-			Dimension: string(DimSecurity), Severity: SevError, Metric: "vulnerable_jars",
+			Dimension: string(dim), Severity: SevError, Metric: "vulnerable_jars",
 			Value:   strconv.Itoa(total),
 			Message: fmt.Sprintf("发现 %d 个漏洞 jar（明细见完整 JSON 报告）", total)}}, nil
 	}

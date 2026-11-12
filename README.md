@@ -15,7 +15,7 @@
 - **一键部署识别**：从 oneinstall v1/v2 部署清单自动生成配置（systemd 单元名、标准健康检查地址、liquibase 排除规则自动填充）
 - **Excel 配置**：模板生成 / 导入校验 / 反向导出，适合现场人工填写与核对
 - **运维扩展**：日志运维（汇聚/清理/切割体检与下发）、备份运维（现场留包/完整性校验/保留期清理/台账导出）、
-  项目巡检（OS/安全/中间件 26 项：20 项自研 + 6 项 auto-check 安全资产）、监控诊断（agent/proxy/PSK/备份目录/云连通性）、
+  项目巡检（32 项：20 项自研 + 12 项 auto-check 资产——安全 6 + OS 1 + 中间件 5）、监控诊断（agent/proxy/PSK/备份目录/云连通性）、
   安全加固清单（只读建议，不改网络与内核）
 - **安全**：所有改服务器的操作先 dry-run，需 `--yes` 才执行；回滚保护运行期日志
 
@@ -188,7 +188,9 @@ go test -count=1 ./internal/inspect   # 回归
 - 资产脚本经 **stdin 下发执行**（`bash -s <file>` / `python3 -s <file>`），零目标机依赖、不进 shell 解释；
 - 旧版 key-DSL 结果（`{"basic","topics"}`）由移植自上游 `internal/result/normalize.go` 的解析器处理（`internal/inspect/legacy.go`）；
 - **每轮更新约定**：`sync → 对比上游 normalize.go 语义 diff → 合并 legacy.go → 全测 → 提交 assets+代码（manifest 记录上游 commit）`；
-- 第一轮迁入 6 项：security-port / security-login / security-agent / interface-interception / kernel-cve / vulnerable-jar（DB 依赖的 security-admin-check 待凭据方案后迁）。
+- 已迁入 12 项：安全 6（security-port/login/agent、interface-interception、kernel-cve、vulnerable-jar）
+  + OS 1（os-check 综合体检）+ 中间件 5（middleware JVM/线程、jvm-spy 就位、threadpool-leak、gis、geoserver）；
+- 暂缓：security-admin-check / version-check / video-url-check（需数据库凭据，待凭据方案落地后迁）。
 
 ## 项目结构
 
