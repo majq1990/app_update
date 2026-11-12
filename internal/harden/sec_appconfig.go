@@ -120,11 +120,53 @@ func isSecretPlaceholder(line string) bool {
 	return v == ""
 }
 
-func anyMatch(lines []string, subs ...string) bool {
+// cfgLineContent 取 "path:line:content" 的 content 部分。
+func cfgLineContent(line string) string {
+	if i := strings.Index(line, ":"); i >= 0 {
+		if j := strings.Index(line[i+1:], ":"); j >= 0 {
+			return line[i+1+j+1:]
+		}
+	}
+	return line
+}
+
+// activeCfgLines 过滤注释行（# / ! 开头）：被注释的配置不生效，不能算作风险。
+func activeCfgLines(lines []string) []string {
+	var out []string
 	for _, ln := range lines {
-		l := strings.ToLower(ln)
+		c := strings.TrimSpace(cfgLineContent(ln))
+		if strings.HasPrefix(c, "#") || strings.HasPrefix(c, "!") {
+			continue
+		}
+		out = append(out, ln)
+	}
+	return out
+}
+
+// maskSecretLine 把 "key=value" 的值替换为 ******，避免体检报告二次泄露口令。
+func maskSecretLine(line string) string {
+	l := strings.ToLower(line)
+	for _, k := range []string{"password", "passwd", "pwd", "secret", "accesskey"} {
+		if i := strings.Index(l, k); i >= 0 {
+			if j := strings.IndexAny(line[i:], "=:"); j >= 0 {
+				return line[:i+j+1] + "******"
+			}
+		}
+	}
+	return line
+}
+
+func anyMatch(lines []string, subs ...string) bool {
+	norm := func(s string) string {
+		s = strings.ToLower(s)
+		s = strings.ReplaceAll(s, " ", "")
+		s = strings.ReplaceAll(s, "\t", "")
+		return s
+	}
+	for _, ln := range lines {
+		l := norm(ln)
 		for _, s := range subs {
-			if strings.Contains(l, s) {
+			if strings.Contains(l, norm(s)) {
 				return true
 			}
 		}
@@ -150,7 +192,7 @@ func RunAppConfigCheck(host string, r *SecReport) {
 	sec := appCfgSections(out)
 
 	// 1. Actuator
-	act := sec["ACTUATOR"]
+	act := activeCfgLines(sec["ACTUATOR"])
 	if anyMatch(act, "=*", "include=*", "include:*", "include=env", "include:env",
 		"include=beans", "include=heapdump", "include=threaddump", "endpoints.enabled=true",
 		"endpoints.enabled:true", "endpoints.enabled = true") {
@@ -164,7 +206,7 @@ func RunAppConfigCheck(host string, r *SecReport) {
 	}
 
 	// 2. Swagger / Knife4j
-	sw := sec["SWAGGER"]
+	sw := activeCfgLines(sec["SWAGGER"])
 	if anyMatch(sw, "swagger.enable=true", "swagger.enable:true", "swagger2.enable=true",
 		"swagger2.enable:true", "springfox.documentation.enabled=true", "knife4j.production=false") {
 		r.Add(SecFinding{Host: host, Category: "应用配置", Item: "在线接口文档开启",
@@ -174,7 +216,7 @@ func RunAppConfigCheck(host string, r *SecReport) {
 	}
 
 	// 3. 异常堆栈
-	ep := sec["ERRORPAGE"]
+	ep := activeCfgLines(sec["ERRORPAGE"])
 	if anyMatch(ep, "always", "on_param", "=true") {
 		r.Add(SecFinding{Host: host, Category: "应用配置", Item: "异常堆栈返回前端",
 			Result: "报错页面泄露类名/路径/SQL", Evidence: evidenceOf(ep, 3),
@@ -183,9 +225,9 @@ func RunAppConfigCheck(host string, r *SecReport) {
 
 	// 4. 明文口令
 	var secrets []string
-	for _, ln := range sec["PASSWORD"] {
+	for _, ln := range activeCfgLines(sec["PASSWORD"]) {
 		if !isSecretPlaceholder(ln) {
-			secrets = append(secrets, ln)
+			secrets = append(secrets, maskSecretLine(ln))
 		}
 	}
 	if len(secrets) > 0 {
@@ -196,7 +238,7 @@ func RunAppConfigCheck(host string, r *SecReport) {
 	}
 
 	// 5. Cookie / Session
-	ck := sec["COOKIE"]
+	ck := activeCfgLines(sec["COOKIE"])
 	if anyMatch(ck, "http-only=false", "http-only:false", "secure=false", "secure:false") {
 		r.Add(SecFinding{Host: host, Category: "应用配置", Item: "Cookie 安全属性关闭",
 			Result: "可被脚本读取或明文传输", Evidence: evidenceOf(ck, 3),
@@ -204,14 +246,14 @@ func RunAppConfigCheck(host string, r *SecReport) {
 	}
 
 	// 6. 平台安全开关
-	if sw2 := sec["SWITCH"]; len(sw2) > 0 {
+	if sw2 := activeCfgLines(sec["SWITCH"]); len(sw2) > 0 {
 		r.Add(SecFinding{Host: host, Category: "应用配置", Item: "平台安全开关未开启",
 			Result: "IP防火墙/操作日志/纵向越权校验等被关闭", Evidence: evidenceOf(sw2, 3),
 			Advice: "按产品安全配置文档开启；越权与审计类开关必须开启", Level: SecMedium, Fixable: "no"})
 	}
 
 	// 7. 内置超级用户
-	if ag := sec["AGENT"]; len(ag) > 0 {
+	if ag := activeCfgLines(sec["AGENT"]); len(ag) > 0 {
 		r.Add(SecFinding{Host: host, Category: "应用配置", Item: "内置超级用户保护未启用",
 			Result: "服务内置管理员可绕过平台登录", Evidence: evidenceOf(ag, 2),
 			Advice: "启用 egova.security.agent 或按「密码加固」禁用内置超级用户",
@@ -219,7 +261,7 @@ func RunAppConfigCheck(host string, r *SecReport) {
 	}
 
 	// 8. 中间件认证
-	mw := sec["MWAUTH"]
+	mw := activeCfgLines(sec["MWAUTH"])
 	var bad []string
 	if anyMatch(mw, "xpack.security.enabled=false", "xpack.security.enabled:false") {
 		bad = append(bad, "Elasticsearch 未开启认证")

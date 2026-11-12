@@ -80,6 +80,11 @@ export EOPS_DB_PASSWORD='<口令>'
 ./eops harden sec gap
 ```
 
+> SSH 认证默认用 `~/.ssh/id_rsa`；密钥不是默认名时加 `--key <私钥路径>`，
+> 口令登录用 `--pass` 或环境变量 `APP_UPDATER_SSH_PASS`。
+> `os/network` 的写操作同样默认 dry-run，`--yes` 才落盘；`network guard/docker`
+> 在 `egova-vpc-nets` 为空时会拒绝执行（防全站不可达）。
+
 ## 交互菜单
 
 不带参数运行 `./eops` 进入交互模式，主菜单按能力域分三组（分组标题仅用于展示，编号即输入选择）：

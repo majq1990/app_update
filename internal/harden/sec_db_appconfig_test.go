@@ -67,11 +67,14 @@ func TestRunAppConfigCheck(t *testing.T) {
 	}
 	found := false
 	for _, f := range r.Findings {
-		if f.Item == "疑似明文口令" && !strings.Contains(f.Evidence, "Passw0rd123") {
-			t.Fatalf("明文口令证据丢失: %+v", f)
-		}
 		if f.Item == "疑似明文口令" {
 			found = true
+			if strings.Contains(f.Evidence, "Passw0rd123") {
+				t.Fatalf("报告不应包含明文口令: %+v", f)
+			}
+			if !strings.Contains(f.Evidence, "******") {
+				t.Fatalf("明文口令应脱敏为 ******: %+v", f)
+			}
 		}
 	}
 	if !found {
@@ -94,6 +97,69 @@ func TestRunAppConfigFixDryRun(t *testing.T) {
 	}
 	if len(r.Backups) != 0 {
 		t.Fatalf("dry-run 不应产生备份: %v", r.Backups)
+	}
+}
+
+func TestAppCfgCommentFilterAndMask(t *testing.T) {
+	lines := []string{
+		"/a.properties:1:#management.endpoints.web.exposure.include=*",
+		"/a.properties:2:management.endpoints.web.exposure.include=*",
+	}
+	act := activeCfgLines(lines)
+	if len(act) != 1 {
+		t.Fatalf("注释行应被过滤，剩余 %v", act)
+	}
+	masked := maskSecretLine("/a.properties:3:spring.datasource.password=Passw0rd123")
+	if strings.Contains(masked, "Passw0rd123") {
+		t.Fatalf("口令未脱敏: %q", masked)
+	}
+	if !strings.Contains(masked, "******") {
+		t.Fatalf("脱敏标记缺失: %q", masked)
+	}
+}
+
+func TestRunAppConfigCommentedOnly(t *testing.T) {
+	fr := fakeSecRunner{byFrag: map[string]string{"scan()": `##ACTUATOR
+/egova/app/conf/a.properties:2:#management.endpoints.web.exposure.include=*
+##END
+##END
+`}}
+	withFakeHost(t, "10.0.0.9", fr)
+	r := NewSecReport("appconfig", []string{"10.0.0.9"}, time.Now())
+	RunAppConfigCheck("10.0.0.9", r)
+	if r.Summary["high"] != 0 {
+		t.Fatalf("注释行不应判高危: %+v", r.Findings)
+	}
+}
+
+func TestAppCfgActuatorSpacedValue(t *testing.T) {
+	fr := fakeSecRunner{byFrag: map[string]string{"scan()": `##ACTUATOR
+/a.properties:155:management.endpoints.web.exposure.include= *
+##END
+##END
+`}}
+	withFakeHost(t, "10.0.0.9", fr)
+	r := NewSecReport("appconfig", []string{"10.0.0.9"}, time.Now())
+	RunAppConfigCheck("10.0.0.9", r)
+	if r.Summary["high"] == 0 {
+		t.Fatalf("include= * 应判高危: %+v", r.Findings)
+	}
+}
+
+func TestRequireVpcMembers(t *testing.T) {
+	withFakeHost(t, "10.0.0.7", fakeSecRunner{defOut: "3"})
+	r := NewSecReport("network", []string{"10.0.0.7"}, time.Now())
+	if err := requireVpcMembers("10.0.0.7", r); err != nil {
+		t.Fatalf("集合有成员时应放行: %v", err)
+	}
+
+	withFakeHost(t, "10.0.0.8", fakeSecRunner{defOut: "0"})
+	r0 := NewSecReport("network", []string{"10.0.0.8"}, time.Now())
+	if err := requireVpcMembers("10.0.0.8", r0); err == nil {
+		t.Fatal("集合为空时必须拒绝限源")
+	}
+	if r0.Summary["critical"] == 0 {
+		t.Fatal("空集合应记录 critical 发现")
 	}
 }
 

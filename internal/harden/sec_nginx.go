@@ -15,6 +15,10 @@ import (
 // nginxConfDirCmd 探测 nginx 配置目录（优先 /egova/apps 下现场布局）。
 const nginxConfDirCmd = `for d in /egova/apps/nginx/conf /etc/nginx /usr/local/nginx/conf; do [ -f "$d/nginx.conf" ] && echo "$d" && break; done`
 
+// nginxGrepExcludes 扫描时排除备份/临时文件：现场 conf.d 里常有 all.location.bak-*、
+// *.tcpbak、*.fixed 等历史副本，一条 autoindex on 出现在备份里会造成误报。
+const nginxGrepExcludes = `--exclude='*bak*' --exclude='*backup*' --exclude='*.old*' --exclude='*~' --exclude='*.fixed*' --exclude='*.tcpbak*' --exclude='*.disabled' --exclude='*.orig' --exclude='*.tmp' --exclude='*.save'`
+
 func detectNginxConfDir() (string, error) {
 	out, err := remoteRun(nginxConfDirCmd)
 	d := strings.TrimSpace(firstLine(out))
@@ -38,7 +42,7 @@ func RunNginxCheck(host string, r *SecReport) {
 	dQ := sq(dir)
 
 	// server_tokens
-	out, _ := remoteRun(fmt.Sprintf(`grep -rEis '^[[:space:]]*server_tokens[[:space:]]+off' %s | head -1`, dQ))
+	out, _ := remoteRun(fmt.Sprintf(`grep -rEis '^[[:space:]]*server_tokens[[:space:]]+off' %s %s | head -1`, nginxGrepExcludes, dQ))
 	if strings.TrimSpace(out) == "" {
 		r.Add(SecFinding{Host: host, Category: "Nginx", Item: "server_tokens",
 			Result: "未关闭，响应头暴露 nginx 版本", Evidence: dir,
@@ -49,7 +53,7 @@ func RunNginxCheck(host string, r *SecReport) {
 	}
 
 	// autoindex
-	out, _ = remoteRun(fmt.Sprintf(`grep -rEis '^[[:space:]]*autoindex[[:space:]]+on' %s | head -3`, dQ))
+	out, _ = remoteRun(fmt.Sprintf(`grep -rEis '^[[:space:]]*autoindex[[:space:]]+on' %s %s | head -3`, nginxGrepExcludes, dQ))
 	if strings.TrimSpace(out) != "" {
 		r.Add(SecFinding{Host: host, Category: "Nginx", Item: "目录浏览 autoindex",
 			Result: "已开启，会列出目录全部文件", Evidence: strings.TrimSpace(firstLine(out)),
@@ -62,7 +66,7 @@ func RunNginxCheck(host string, r *SecReport) {
 	// 安全响应头
 	missing := ""
 	for _, h := range []string{"X-Content-Type-Options", "X-Frame-Options", "Referrer-Policy"} {
-		out, _ = remoteRun(fmt.Sprintf(`grep -rqiE 'add_header[[:space:]]*%s' %s && echo yes || echo no`, h, dQ))
+		out, _ = remoteRun(fmt.Sprintf(`grep -rqiE 'add_header[[:space:]]*%s' %s %s && echo yes || echo no`, h, nginxGrepExcludes, dQ))
 		if strings.TrimSpace(out) == "no" {
 			missing += h + " "
 		}
@@ -79,7 +83,7 @@ func RunNginxCheck(host string, r *SecReport) {
 	// 敏感文件拦截
 	out, _ = remoteRun(`test -f /egova/apps/nginx/conf/conf.d/00-egova-security-locations.conf && echo yes || echo no`)
 	if strings.TrimSpace(out) == "no" {
-		out2, _ := remoteRun(fmt.Sprintf(`grep -rEis '\.git|WEB-INF|swagger-ui|actuator' %s | head -1`, dQ))
+		out2, _ := remoteRun(fmt.Sprintf(`grep -rEis '\.git|WEB-INF|swagger-ui|actuator' %s %s | head -1`, nginxGrepExcludes, dQ))
 		if strings.TrimSpace(out2) == "" {
 			r.Add(SecFinding{Host: host, Category: "Nginx", Item: "敏感文件/调试接口拦截",
 				Result: "未部署（.git/.bak/WEB-INF/actuator/swagger 可被下载）", Level: SecHigh,
@@ -95,7 +99,7 @@ func RunNginxCheck(host string, r *SecReport) {
 	}
 
 	// TLS 协议（有 443 监听才检查）
-	out, _ = remoteRun(fmt.Sprintf(`ss -lntH 2>/dev/null | grep -q ':443 ' && grep -rEis 'ssl_protocols' %s | head -2 || echo none`, dQ))
+	out, _ = remoteRun(fmt.Sprintf(`ss -lntH 2>/dev/null | grep -q ':443 ' && grep -rEis 'ssl_protocols' %s %s | head -2 || echo none`, nginxGrepExcludes, dQ))
 	tls := strings.TrimSpace(out)
 	if tls != "none" && tls != "" {
 		if strings.Contains(tls, "SSLv3") || strings.Contains(tls, "TLSv1 ") || strings.Contains(tls, "TLSv1;") || strings.Contains(tls, "TLSv1.0") || strings.Contains(tls, "SSLv2") {
@@ -249,6 +253,8 @@ func originOf(backup string) string {
 }
 
 func truncate(s string, n int) string {
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
 	if len(s) <= n {
 		return s
 	}

@@ -8,6 +8,8 @@ package main
 //	eops harden sec rollback --manifest m.json  按备份 manifest 回滚
 //	eops harden sec appconfig check|fix [hosts] 应用配置体检 / 白名单安全值写入
 //	eops harden sec db [hosts] --type mysql|dm|kingbase|highgo  数据库只读体检
+//	eops harden sec os check|fix [hosts]  系统基线（口令/SSH/审计），fix 需 --yes
+//	eops harden sec network status|docker|guard|ban|unban  网络层拦截（默认 dry-run）
 //	eops harden sec gap              输出 oneinstall 安全工具箱能力对照表
 //
 // 红线：SSH 登录方式不改（无密钥确认不碰）；数据库只读；拦截链可整链回退。
@@ -22,11 +24,18 @@ import (
 
 	"github.com/majq1990/app-updater-go/internal/config"
 	"github.com/majq1990/app-updater-go/internal/harden"
+	"github.com/majq1990/app-updater-go/internal/sshx"
+)
+
+// secKeyPath/secPass 供 sec 子命令统一覆盖 SSH 认证（默认走 ~/.ssh/id_rsa 或环境变量口令）。
+var (
+	secKeyPath string
+	secPass    string
 )
 
 func cmdHardenSec(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("用法: eops harden sec check|fix|rollback|appconfig|db|gap -c config.yaml [--host IP] [--yes]")
+		return fmt.Errorf("用法: eops harden sec check|fix|rollback|appconfig|db|os|network|gap -c config.yaml [--host IP] [--yes]")
 	}
 	switch args[0] {
 	case "check":
@@ -46,8 +55,12 @@ func cmdHardenSec(args []string) error {
 		return cmdHardenSecAppConfig(args[1:])
 	case "db":
 		return cmdHardenSecDB(args[1:])
+	case "os":
+		return cmdHardenSecOS(args[1:])
+	case "network":
+		return cmdHardenSecNetwork(args[1:])
 	default:
-		return fmt.Errorf("未知 sec 子命令: %s（可用 check|fix|rollback|appconfig|db|gap）", args[0])
+		return fmt.Errorf("未知 sec 子命令: %s（可用 check|fix|rollback|appconfig|db|os|network|gap）", args[0])
 	}
 }
 
@@ -55,8 +68,18 @@ func cmdHardenSec(args []string) error {
 // Dial 返回的接口是 appflow.Conn，其动态类型 *sshx.Client 满足 SecRunner
 // （Run + RunWithStdin）；这里做一次类型断言兜底。
 func secDialer(cfg *config.Config) func(string) (harden.SecRunner, error) {
-	dial := &execDialer{cfg: cfg, over: sshOverride()}
+	over := sshx.Auth{
+		Password: firstStr(secPass, os.Getenv("APP_UPDATER_SSH_PASS")),
+		KeyPath:  secKeyPath,
+	}
+	dial := &execDialer{cfg: cfg, over: over}
+	// 按主机复用连接：sec 每个检查项都会取一次 runner，若每次新建 SSH 连接，
+	// 单机体检会建立几十条连接（慢且刷主机指纹日志）。
+	cache := map[string]harden.SecRunner{}
 	return func(host string) (harden.SecRunner, error) {
+		if r, ok := cache[host]; ok {
+			return r, nil
+		}
 		c, err := dial.Dial(config.Host{Host: host})
 		if err != nil {
 			return nil, err
@@ -65,6 +88,7 @@ func secDialer(cfg *config.Config) func(string) (harden.SecRunner, error) {
 		if !ok {
 			return nil, fmt.Errorf("%s 连接不支持脚本下发（SecRunner）", host)
 		}
+		cache[host] = sr
 		return sr, nil
 	}
 }
@@ -125,6 +149,8 @@ func cmdHardenSecCheck(args []string) error {
 	cfgPath := fs.String("c", "config.yaml", "配置文件")
 	host := fs.String("host", "all", "主机（IP / all / 逗号分隔）")
 	jsonOut := fs.String("json", "", "JSON 报告输出路径")
+	fs.StringVar(&secKeyPath, "key", "", "SSH 私钥路径（默认 ~/.ssh/id_rsa）")
+	fs.StringVar(&secPass, "pass", "", "SSH 密码（也可用 APP_UPDATER_SSH_PASS）")
 	fs.Parse(args)
 
 	cfg, err := config.Load(*cfgPath)
@@ -156,6 +182,8 @@ func cmdHardenSecFix(args []string) error {
 	host := fs.String("host", "all", "主机（IP / all / 逗号分隔）")
 	yes := fs.Bool("yes", false, "确认执行修复（默认 dry-run）")
 	manifest := fs.String("manifest-out", "", "备份 manifest 输出路径")
+	fs.StringVar(&secKeyPath, "key", "", "SSH 私钥路径（默认 ~/.ssh/id_rsa）")
+	fs.StringVar(&secPass, "pass", "", "SSH 密码（也可用 APP_UPDATER_SSH_PASS）")
 	fs.Parse(args)
 
 	cfg, err := config.Load(*cfgPath)
@@ -203,6 +231,8 @@ func cmdHardenSecRollback(args []string) error {
 	cfgPath := fs.String("c", "config.yaml", "配置文件")
 	manifestPath := fs.String("manifest", "", "备份 manifest 文件（sec fix --manifest-out 产物）")
 	yes := fs.Bool("yes", false, "确认回滚")
+	fs.StringVar(&secKeyPath, "key", "", "SSH 私钥路径（默认 ~/.ssh/id_rsa）")
+	fs.StringVar(&secPass, "pass", "", "SSH 密码（也可用 APP_UPDATER_SSH_PASS）")
 	fs.Parse(args)
 
 	if *manifestPath == "" {
@@ -303,6 +333,8 @@ func cmdHardenSecAppConfig(args []string) error {
 	yes := fs.Bool("yes", false, "确认写入（默认 dry-run）")
 	manifest := fs.String("manifest-out", "", "备份 manifest 输出路径")
 	jsonOut := fs.String("json", "", "JSON 报告输出路径")
+	fs.StringVar(&secKeyPath, "key", "", "SSH 私钥路径（默认 ~/.ssh/id_rsa）")
+	fs.StringVar(&secPass, "pass", "", "SSH 密码（也可用 APP_UPDATER_SSH_PASS）")
 	fs.Parse(args[1:])
 
 	cfg, err := config.Load(*cfgPath)
@@ -356,6 +388,8 @@ func cmdHardenSecDB(args []string) error {
 	pwEnv := fs.String("password-env", "EOPS_DB_PASSWORD", "口令所在环境变量名")
 	sqlOut := fs.String("sql-out", "remediation.sql", "整改 SQL 输出路径（空=不输出）")
 	jsonOut := fs.String("json", "", "JSON 报告输出路径")
+	fs.StringVar(&secKeyPath, "key", "", "SSH 私钥路径（默认 ~/.ssh/id_rsa）")
+	fs.StringVar(&secPass, "pass", "", "SSH 密码（也可用 APP_UPDATER_SSH_PASS）")
 	fs.Parse(args)
 
 	opts := harden.NormalizeDB(harden.DBOptions{
@@ -395,6 +429,123 @@ func cmdHardenSecDB(args []string) error {
 		} else {
 			fmt.Printf("整改 SQL: %s\n", *sqlOut)
 		}
+	}
+	return printSecReport(rep, *jsonOut)
+}
+
+// cmdHardenSecOS 系统基线体检 / 幂等修复。
+func cmdHardenSecOS(args []string) error {
+	if len(args) == 0 || (args[0] != "check" && args[0] != "fix") {
+		return fmt.Errorf("用法: eops harden sec os check|fix -c config.yaml [--host IP] [--yes] [--ssh-password-off]")
+	}
+	sub := args[0]
+	fs := flag.NewFlagSet("harden sec os "+sub, flag.ExitOnError)
+	cfgPath := fs.String("c", "config.yaml", "配置文件")
+	host := fs.String("host", "all", "主机（IP / all / 逗号分隔）")
+	yes := fs.Bool("yes", false, "确认修复（默认 dry-run）")
+	sshPwdOff := fs.Bool("ssh-password-off", false, "同时关闭 SSH 密码登录（需已确认密钥可登录）")
+	manifest := fs.String("manifest-out", "", "备份 manifest 输出路径")
+	jsonOut := fs.String("json", "", "JSON 报告输出路径")
+	fs.StringVar(&secKeyPath, "key", "", "SSH 私钥路径（默认 ~/.ssh/id_rsa）")
+	fs.StringVar(&secPass, "pass", "", "SSH 密码（也可用 APP_UPDATER_SSH_PASS）")
+	fs.Parse(args[1:])
+
+	cfg, err := config.Load(*cfgPath)
+	if err != nil {
+		return err
+	}
+	if err := gateValidation(cfg, *yes); err != nil {
+		return err
+	}
+	hosts := secHosts(cfg, *host)
+	if len(hosts) == 0 {
+		return fmt.Errorf("没有匹配的主机")
+	}
+	dial := secDialer(cfg)
+	rep := harden.NewSecReport("os", hosts, time.Now())
+	for _, h := range hosts {
+		harden.SetCurrentHost(h, dial)
+		if sub == "check" {
+			harden.RunOSCheck(h, rep)
+			continue
+		}
+		if ferr := harden.RunOSFix(h, rep, *yes, *sshPwdOff); ferr != nil {
+			rep.AddError(fmt.Sprintf("os fix %s: %v", h, ferr))
+		}
+	}
+	rep.SortFindings()
+	if sub == "fix" && *manifest != "" && *yes {
+		b, jerr := json.MarshalIndent(harden.ManifestBackups(rep), "", "  ")
+		if jerr == nil {
+			_ = os.WriteFile(*manifest, append(b, '\n'), 0o644)
+			fmt.Printf("备份 manifest: %s\n", *manifest)
+		}
+	}
+	if sub == "fix" && !*yes {
+		fmt.Println("（dry-run 完成，未落盘；确认后加 --yes）")
+		return nil
+	}
+	return printSecReport(rep, *jsonOut)
+}
+
+// cmdHardenSecNetwork 网络层拦截：status / docker / guard / ban / unban。
+func cmdHardenSecNetwork(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("用法: eops harden sec network status|docker|guard|ban|unban -c config.yaml")
+	}
+	sub := args[0]
+	fs := flag.NewFlagSet("harden sec network "+sub, flag.ExitOnError)
+	cfgPath := fs.String("c", "config.yaml", "配置文件")
+	host := fs.String("host", "all", "主机（IP / all / 逗号分隔）")
+	yes := fs.Bool("yes", false, "确认执行（默认 dry-run）")
+	installCron := fs.Bool("install-cron", false, "封禁后安装 5 分钟定时任务")
+	ip := fs.String("ip", "", "unban 目标 IP（或 all 清空）")
+	jsonOut := fs.String("json", "", "JSON 报告输出路径")
+	fs.StringVar(&secKeyPath, "key", "", "SSH 私钥路径（默认 ~/.ssh/id_rsa）")
+	fs.StringVar(&secPass, "pass", "", "SSH 密码（也可用 APP_UPDATER_SSH_PASS）")
+	fs.Parse(args[1:])
+
+	cfg, err := config.Load(*cfgPath)
+	if err != nil {
+		return err
+	}
+	if err := gateValidation(cfg, *yes); err != nil {
+		return err
+	}
+	hosts := secHosts(cfg, *host)
+	if len(hosts) == 0 {
+		return fmt.Errorf("没有匹配的主机")
+	}
+	dial := secDialer(cfg)
+	rep := harden.NewSecReport("network", hosts, time.Now())
+	for _, h := range hosts {
+		harden.SetCurrentHost(h, dial)
+		var nerr error
+		switch sub {
+		case "status":
+			harden.RunNetworkStatus(h, rep)
+		case "docker":
+			nerr = harden.RunNetworkDocker(h, rep, *yes)
+		case "guard":
+			nerr = harden.RunNetworkGuard(h, rep, *yes)
+		case "ban":
+			nerr = harden.RunNetworkBan(h, rep, *yes, *installCron)
+		case "unban":
+			if *ip == "" {
+				return fmt.Errorf("unban 需要 --ip <IP> 或 --ip all")
+			}
+			nerr = harden.RunNetworkUnban(h, *ip, rep)
+		default:
+			return fmt.Errorf("未知 network 子命令: %s（可用 status|docker|guard|ban|unban）", sub)
+		}
+		if nerr != nil {
+			rep.AddError(fmt.Sprintf("network %s %s: %v", sub, h, nerr))
+		}
+	}
+	rep.SortFindings()
+	if sub != "status" && !*yes {
+		fmt.Println("（dry-run 完成，未落盘；确认后加 --yes）")
+		return nil
 	}
 	return printSecReport(rep, *jsonOut)
 }

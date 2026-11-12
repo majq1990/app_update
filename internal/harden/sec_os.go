@@ -125,7 +125,7 @@ func RunOSCheck(host string, r *SecReport) {
 	}
 
 	// ---- 关键文件权限 ----
-	out, _ = remoteRun(`stat -c '%a %n' /etc/shadow /etc/gshadow 2>/dev/null | awk '$1 !~ /^(000|0400|0640)$/ {print}'`)
+	out, _ = remoteRun(`stat -c '%a %n' /etc/shadow /etc/gshadow 2>/dev/null | awk '{m=sprintf("%04d",$1); if (m!="0000" && m!="0400" && m!="0640") print}'`)
 	if s := strings.TrimSpace(out); s != "" {
 		rec(SecMedium, "权限", "敏感文件权限过宽", s, "", "shadow/gshadow 收敛到 000/0400", "no")
 	} else {

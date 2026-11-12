@@ -208,9 +208,9 @@ func (r *SecReport) Text(w io.Writer) {
 			cur = f.Host
 			fmt.Fprintf(w, "\n主机 %s：\n", cur)
 		}
-		fmt.Fprintf(w, "  %s %-14s %-22s %s\n", SecLabel(f.Level), "["+f.Category+"]", f.Item, f.Result)
+		fmt.Fprintf(w, "  %s %-14s %-22s %s\n", SecLabel(f.Level), "["+f.Category+"]", f.Item, oneLine(f.Result))
 		if f.Evidence != "" {
-			fmt.Fprintf(w, "        证据：%s\n", f.Evidence)
+			fmt.Fprintf(w, "        证据：%s\n", oneLine(f.Evidence))
 		}
 		fmt.Fprintf(w, "        建议：%s（%s）\n", f.Advice, fixHint(f.Fixable))
 	}
@@ -222,6 +222,13 @@ func (r *SecReport) Text(w io.Writer) {
 	if r.HasBlocking() {
 		fmt.Fprintln(w, "❗存在高危项，建议尽快处置（可用 fix 的 dry-run 预览修复动作）")
 	}
+}
+
+// oneLine 把多行证据压成单行（终端摘要可读，JSON 保留原值）。
+func oneLine(s string) string {
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.ReplaceAll(s, "\n", "; ")
+	return s
 }
 
 func fixHint(fixable string) string {

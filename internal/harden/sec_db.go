@@ -83,18 +83,22 @@ func dbScript(o DBOptions) string {
 umask 077
 U=%s
 PW=%s
+H=%s
+PT=%s
 command -v mysql >/dev/null 2>&1 || { echo "##NOCLIENT"; echo "##END"; exit 0; }
 CNF=$(mktemp /tmp/.eops_db.XXXXXX) || exit 1
 trap 'rm -f "$CNF"' EXIT
-printf '[client]\nuser=%%s\npassword=%%s\n' "$U" "$PW" > "$CNF"
-M="mysql --defaults-extra-file=$CNF -h %s -P %s -N -B --default-character-set=utf8"
-echo "##VER"; $M -e "SELECT VERSION();" 2>/dev/null
-echo "##USERS"; $M -e "SELECT user,host,plugin,IF(authentication_string IS NULL OR authentication_string='','EMPTY','SET') FROM mysql.user;" 2>/dev/null
-echo "##LOCALINFILE"; $M -e "SELECT @@local_infile;" 2>/dev/null
-echo "##SECUREFILE"; $M -e "SELECT IFNULL(@@secure_file_priv,'');" 2>/dev/null
-echo "##GENERALLOG"; $M -e "SELECT @@general_log;" 2>/dev/null
-echo "##SLOWLOG"; $M -e "SELECT @@slow_query_log;" 2>/dev/null
-echo "##VALIDATEPWD"; $M -e "SELECT COUNT(*) FROM information_schema.plugins WHERE plugin_name LIKE 'validate_password%%' AND plugin_status='ACTIVE';" 2>/dev/null
+PWQ=$(printf '%%s' "$PW" | sed 's/\\/\\\\/g; s/"/\\"/g')
+printf '[client]\nuser="%%s"\npassword="%%s"\n' "$U" "$PWQ" > "$CNF"
+M="mysql --defaults-extra-file=$CNF -N -B --default-character-set=utf8"
+runq() { $M -h "$H" -P "$PT" -e "$1" 2>/dev/null; }
+echo "##VER"; runq "SELECT VERSION();"
+echo "##USERS"; runq "SELECT user,host,plugin,IF(authentication_string IS NULL OR authentication_string='','EMPTY','SET') FROM mysql.user;"
+echo "##LOCALINFILE"; runq "SELECT @@local_infile;"
+echo "##SECUREFILE"; runq "SELECT IFNULL(@@secure_file_priv,'');"
+echo "##GENERALLOG"; runq "SELECT @@general_log;"
+echo "##SLOWLOG"; runq "SELECT @@slow_query_log;"
+echo "##VALIDATEPWD"; runq "SELECT COUNT(*) FROM information_schema.plugins WHERE plugin_name LIKE 'validate_password%%' AND plugin_status='ACTIVE';"
 echo "##END"
 `, sq(o.User), sq(o.Password), sq(o.Host), sq(o.Port))
 
@@ -119,29 +123,30 @@ echo "##END"
 umask 077
 U=%s
 PW=%s
+H=%s
+PT=%s
 DB=%s
 PG=""
 for c in psql ksql; do command -v "$c" >/dev/null 2>&1 && { PG="$c"; break; }; done
 [ -n "$PG" ] || { echo "##NOCLIENT"; echo "##END"; exit 0; }
 PF=$(mktemp /tmp/.eops_pg.XXXXXX) || exit 1
 trap 'rm -f "$PF"' EXIT
-printf '%%s:%%s:%%s:%%s:%%s\n' %s %s %s "$U" "$PW" > "$PF"
+PGE=$(printf '%%s' "$PW" | sed 's/\\/\\\\/g; s/:/\\:/g')
+printf '%%s:%%s:%%s:%%s:%%s\n' "$H" "$PT" "$DB" "$U" "$PGE" > "$PF"
 chmod 600 "$PF"
 export PGPASSFILE="$PF"
-Q="$PG -h %s -p %s -U %s -d $DB -w -A -t -F |"
-echo "##VER"; $Q -c "select version();" 2>/dev/null
-echo "##ROLES"; $Q -c "select rolname,rolcanlogin,rolsuper from pg_roles;" 2>/dev/null
-echo "##PWENC"; $Q -c "show password_encryption;" 2>/dev/null
-echo "##LOGCONN"; $Q -c "show log_connections;" 2>/dev/null
-echo "##LOGSTMT"; $Q -c "show log_statement;" 2>/dev/null
+runq() { "$PG" -h "$H" -p "$PT" -U "$U" -d "$DB" -w -A -t -F '|' -c "$1" 2>/dev/null; }
+echo "##VER"; runq "select version();"
+echo "##ROLES"; runq "select rolname,rolcanlogin,rolsuper from pg_roles;"
+echo "##PWENC"; runq "show password_encryption;"
+echo "##LOGCONN"; runq "show log_connections;"
+echo "##LOGSTMT"; runq "show log_statement;"
 echo "##HBA"
 for f in $(find / -maxdepth 5 -name pg_hba.conf -type f 2>/dev/null | head -3); do
   grep -vE '^[[:space:]]*#' "$f" 2>/dev/null | grep -E '[[:space:]]trust[[:space:]]*$' | head -3 | sed "s#^#$f: #"
 done
 echo "##END"
-`, sq(o.User), sq(o.Password), sq(derefOr(o.Name, "postgres")),
-			sq(o.Host), sq(o.Port), sq(o.Name),
-			sq(o.Host), sq(o.Port), sq(o.User))
+`, sq(o.User), sq(o.Password), sq(o.Host), sq(o.Port), sq(derefOr(o.Name, "postgres")))
 	}
 }
 

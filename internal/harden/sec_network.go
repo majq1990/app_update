@@ -9,6 +9,7 @@ package harden
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -39,11 +40,11 @@ func RunNetworkStatus(host string, r *SecReport) {
 			Evidence: evidence, Level: level, Fixable: "yes"})
 	}
 	out, _ := remoteRun(fmt.Sprintf(
-		`printf 'vpc=%s\n' "$(ipset list -n 2>/dev/null | grep -c '^%s$')"; `+
-			`printf 'guard=%s\n' "$(iptables -nL %s 2>/dev/null | wc -l)"; `+
-			`printf 'ban=%s\n' "$(ipset list %s 2>/dev/null | sed -n '6,200p' | awk 'NF{c++} END{print c+0}')"; `+
-			`printf 'chain_in=%s\n' "$(iptables -nL INPUT 2>/dev/null | grep -c '%s')"`,
-		vpcSet, vpcSet, guardChain, guardChain, banSet, banSet, banChain, banChain))
+		`printf 'vpc=%%s\n' "$(ipset list -n 2>/dev/null | grep -c '^%s$')"; `+
+			`printf 'guard=%%s\n' "$(iptables -S %s 2>/dev/null | grep -c '^-A')"; `+
+			`printf 'ban=%%s\n' "$(ipset list %s 2>/dev/null | sed -n '6,200p' | awk 'NF{c++} END{print c+0}')"; `+
+			`printf 'chain_in=%%s\n' "$(iptables -nL INPUT 2>/dev/null | grep -c '%s')"`,
+		vpcSet, guardChain, banSet, banChain))
 	if strings.TrimSpace(out) == "" {
 		r.AddError(host + " iptables/ipset 查询失败（可能无权限）")
 		return
@@ -111,6 +112,32 @@ func networkEnsureCmd() string {
 }
 
 // runNetworkGuard 高危端口限源（DOCKER/INPUT 双挂 EGOVA-SEC-GUARD）。
+// vpcMemberCount 返回白名单集合成员数（集合不存在或为空 → 0）。
+// 限源前必须校验：集合为空时加 DROP 规则会让所有来源都不可达（含运维），
+// 因此 guard/docker 在 --yes 前强制要求集合非空。
+func vpcMemberCount() int {
+	out, err := remoteRun(fmt.Sprintf(
+		`ipset list %s 2>/dev/null | sed -n '6,100000p' | awk 'NF{c++} END{print c+0}'`, vpcSet))
+	if err != nil {
+		return 0
+	}
+	n, _ := strconv.Atoi(strings.TrimSpace(out))
+	return n
+}
+
+// requireVpcMembers 空集合拒绝执行（返回错误并由 CLI 记录）。
+func requireVpcMembers(host string, r *SecReport) error {
+	n := vpcMemberCount()
+	if n > 0 {
+		return nil
+	}
+	r.Add(SecFinding{Host: host, Category: "网络拦截", Item: "白名单集合为空，已拒绝限源",
+		Result: "egova-vpc-nets 无成员，执行 DROP 会导致全站不可达",
+		Advice: "先导入内部网段：ipset add egova-vpc-nets <网段>（或执行 oneinstall 端口加固导入配置）",
+		Level:  SecCritical, Fixable: "no"})
+	return fmt.Errorf("egova-vpc-nets 为空，拒绝执行限源（防误封）")
+}
+
 func RunNetworkGuard(host string, r *SecReport, yes bool) error {
 	// 采集高危且在监听的端口
 	out, err := remoteRun(listeningPortsCmd)
@@ -138,12 +165,18 @@ func RunNetworkGuard(host string, r *SecReport, yes bool) error {
 				guardChain, p, guardChain, p))
 	}
 	if !yes {
+		if vpcMemberCount() == 0 {
+			fmt.Printf("  ⚠️ %s 未建立/为空：真实执行会被拒绝（先导入内网网段）\n", vpcSet)
+		}
 		fmt.Printf("  [network guard 计划] %s：限源端口 %v\n", host, targets)
 		for _, rl := range rules {
 			fmt.Printf("    $ %s\n", truncate(rl, 130))
 		}
 		fmt.Println("  （dry-run；确认后加 --yes 执行）")
 		return nil
+	}
+	if err := requireVpcMembers(host, r); err != nil {
+		return err
 	}
 	if _, err := remoteRun(networkEnsureCmd()); err != nil {
 		return err
@@ -200,12 +233,18 @@ func RunNetworkDocker(host string, r *SecReport, yes bool) error {
 			fmt.Sprintf(`iptables -C DOCKER-USER -p tcp --dport %s -j DROP 2>/dev/null || iptables -I DOCKER-USER 1 -p tcp --dport %s -m comment --comment eops-sec-guard -j DROP`, p, p))
 	}
 	if !yes {
+		if vpcMemberCount() == 0 {
+			fmt.Printf("  ⚠️ %s 未建立/为空：真实执行会被拒绝（先导入内网网段）\n", vpcSet)
+		}
 		fmt.Printf("  [network docker 计划] %s：容器端口限源 %v\n", host, dedupeStrings(exposed))
 		for _, rl := range rules {
 			fmt.Printf("    $ %s\n", truncate(rl, 130))
 		}
 		fmt.Println("  （dry-run；确认后加 --yes 执行）")
 		return nil
+	}
+	if err := requireVpcMembers(host, r); err != nil {
+		return err
 	}
 	if _, err := remoteRun(networkEnsureCmd()); err != nil {
 		return err
