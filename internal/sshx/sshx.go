@@ -3,6 +3,7 @@
 package sshx
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -15,6 +16,40 @@ import (
 
 	"github.com/majq1990/app-updater-go/internal/syncx"
 )
+
+// RunWithStdin 在远端执行 cmd，并把 stdin 内容喂给该命令的标准输入。
+// 用于「脚本作为数据下发」（如巡检资产脚本 bash -s / python3 -），
+// 脚本内容不经过 shell 解释，不产生命令注入面。
+func (c *Client) RunWithStdin(cmd string, stdin []byte) (string, error) {
+	sess, err := c.cli.NewSession()
+	if err != nil {
+		return "", fmt.Errorf("创建会话失败: %w", err)
+	}
+	defer sess.Close()
+
+	w, err := sess.StdinPipe()
+	if err != nil {
+		return "", fmt.Errorf("获取 stdin 失败: %w", err)
+	}
+	var outBuf bytes.Buffer
+	sess.Stdout = &outBuf
+	sess.Stderr = &outBuf
+
+	if err := sess.Start(cmd); err != nil {
+		return "", fmt.Errorf("启动命令失败: %w", err)
+	}
+	if len(stdin) > 0 {
+		if _, werr := w.Write(stdin); werr != nil {
+			return "", fmt.Errorf("写入 stdin 失败: %w", werr)
+		}
+	}
+	_ = w.Close()
+
+	if err := sess.Wait(); err != nil {
+		return outBuf.String(), fmt.Errorf("执行失败: %w", err)
+	}
+	return outBuf.String(), nil
+}
 
 // Auth SSH 连接参数。
 type Auth struct {

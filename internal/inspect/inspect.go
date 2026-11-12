@@ -146,6 +146,10 @@ type Env struct {
 //   - Applies 决定该目标是否需要跑本检查；
 //   - HostScoped 表示主机级检查（OS/安全）：同一主机只跑一次，
 //     不随应用目标重复（实弹发现：7 个应用会各自报一遍 sshd/sudoers）；
+//   - Asset 非空表示资产脚本检查：脚本内容经 stdin 下发（bash -s / python3 -），
+//     不进 shell 解释；Command 返回完整远端命令（含解释器与参数）；
+//   - Applies 返回 false 表示该目标不跑本检查；带 Applies 的检查不强制 HostScoped
+//     （如按应用扫描漏洞 jar 的资产检查）；
 //   - Command 返回只读远端命令；
 //   - Evaluate 解析输出，产出指标与异常（纯函数，便于单测）。
 type Check struct {
@@ -153,6 +157,7 @@ type Check struct {
 	Dimension   Dimension
 	Description string
 	HostScoped  bool
+	Asset       string // internal/inspect/assets/autocheck/ 下的资产文件名（空=内置命令检查）
 	Applies     func(Env) bool
 	Command     func(Env) (string, error)
 	Evaluate    func(Env, string) ([]Metric, []Finding, error)
@@ -163,12 +168,18 @@ var registry []Check
 
 // register 由各 checks_*.go 在 init 中登记。
 // 规则：os / security 维度天然是主机级检查，统一标记 HostScoped，
-// 由 Runner 按主机去重（实弹教训：18 个应用会把 sshd/sudoers 重复报 18 遍）。
+// 由 Runner 按主机去重（实弹教训：18 个应用会把 sshd/sudoers 重复报 18 遍）；
+// 带 Applies 的检查（按应用/按条件筛选）不强制。
 func register(c Check) {
-	if c.Dimension == DimOS || c.Dimension == DimSecurity {
+	if (c.Dimension == DimOS || c.Dimension == DimSecurity) && c.Applies == nil {
 		c.HostScoped = true
 	}
 	registry = append(registry, c)
+}
+
+// StdinRunner 支持脚本下发的连接（sshx.Client 实现）。
+type StdinRunner interface {
+	RunWithStdin(cmd string, stdin []byte) (string, error)
 }
 
 // Checks 返回全部检查项（按维度、名称排序）。
@@ -339,7 +350,23 @@ func runOneScoped(conn Conn, env Env, c Check, hostScoped bool) Result {
 		return res
 	}
 	start := time.Now()
-	out, err := conn.Run(cmdStr)
+	var out string
+	if c.Asset != "" {
+		// 资产脚本：内容经 stdin 下发（bash -s / python3 -），不进 shell 解释
+		script, ok := assetScript(c.Asset)
+		if !ok {
+			res.Err = "资产脚本不存在: " + c.Asset
+			return res
+		}
+		sr, ok := conn.(StdinRunner)
+		if !ok {
+			res.Err = "连接不支持脚本下发（缺 RunWithStdin）"
+			return res
+		}
+		out, err = sr.RunWithStdin(cmdStr, script)
+	} else {
+		out, err = conn.Run(cmdStr)
+	}
 	res.DurationMs = time.Since(start).Milliseconds()
 	if err != nil {
 		res.Err = "执行失败: " + err.Error()

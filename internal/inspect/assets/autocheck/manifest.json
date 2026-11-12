@@ -1,0 +1,13 @@
+{
+  "source": "gitlab.egova.com.cn:devops/auto-check",
+  "commit": "29ddae45f69ad8072224f878b94e79e495d3dfe5",
+  "synced_at": "2026-11-12 11:27:43",
+  "files": {
+    "security-port": {"sha256": "5ad50136786d08a4a9602f6e11878153671623dda8e4db8e9a594a4e998370c6"},
+    "security-login": {"sha256": "e7f7b9986398783b511d0ba9e99f35a41b16f6c84aac014b1709767bc904608f"},
+    "security-agent": {"sha256": "d64e87e9c36eed71611cf8584159034f267865a9391eb8279b72b380b87b2e1f"},
+    "interface-interception": {"sha256": "3d097f353e54aab2957071de606a178b822536f0424ac299a8bae74372a341ae"},
+    "kernel-cve": {"sha256": "b1749844930c84ebea9233fcfb55e513e498219cdae436a2e2a43d15196c3a1d"},
+    "vulnerable-jar": {"sha256": "8e9c4a2f7c96a7604094ba5fc2be02ac4b94ae9b99ef62ef0f7012835a17f5e9"}
+  }
+}
