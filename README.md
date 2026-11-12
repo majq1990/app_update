@@ -53,6 +53,33 @@ mv eops-linux-amd64 eops
 ./eops harden check -c config.yaml                            # 加固清单（只读）
 ```
 
+### 安全加固 sec 系列（对齐 oneinstall_v2 安全工具箱）
+
+```bash
+# 只读体检：暴露面/未授权 + nginx + tomcat
+./eops harden sec check -c config.yaml --host all
+
+# 写修复（默认 dry-run；--yes 落盘，改前逐文件备份，nginx -t 失败自动还原）
+./eops harden sec fix -c config.yaml --host 10.0.0.11 --manifest-out sec-manifest.json
+./eops harden sec rollback -c config.yaml --manifest sec-manifest.json --yes
+
+# 应用配置体检 / 仅写 8 个白名单键（Swagger/Actuator/错误页）
+./eops harden sec appconfig check -c config.yaml
+./eops harden sec appconfig fix   -c config.yaml --yes
+
+# 数据库只读体检（凭据只走环境变量，不进命令行/不落盘）
+export EOPS_DB_PASSWORD='<口令>'
+./eops harden sec db -c config.yaml --type mysql --db-host 127.0.0.1 \
+    --db-user root --sql-out remediation.sql
+
+# 系统基线 / 网络拦截
+./eops harden sec os check|fix -c config.yaml
+./eops harden sec network status|docker|guard|ban|unban|install-cron -c config.yaml
+
+# 能力对照表
+./eops harden sec gap
+```
+
 ## 交互菜单
 
 不带参数运行 `./eops` 进入交互模式，主菜单按能力域分三组（分组标题仅用于展示，编号即输入选择）：

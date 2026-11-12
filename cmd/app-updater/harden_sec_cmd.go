@@ -6,6 +6,8 @@ package main
 //	eops harden sec fix    [hosts]   写修复（默认 dry-run，--yes 执行；改前逐文件备份，
 //	                                   nginx -t 失败自动还原；不带 --yes 永不落盘）
 //	eops harden sec rollback --manifest m.json  按备份 manifest 回滚
+//	eops harden sec appconfig check|fix [hosts] 应用配置体检 / 白名单安全值写入
+//	eops harden sec db [hosts] --type mysql|dm|kingbase|highgo  数据库只读体检
 //	eops harden sec gap              输出 oneinstall 安全工具箱能力对照表
 //
 // 红线：SSH 登录方式不改（无密钥确认不碰）；数据库只读；拦截链可整链回退。
@@ -24,7 +26,7 @@ import (
 
 func cmdHardenSec(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("用法: eops harden sec check|fix|rollback|gap -c config.yaml [--host IP] [--yes]")
+		return fmt.Errorf("用法: eops harden sec check|fix|rollback|appconfig|db|gap -c config.yaml [--host IP] [--yes]")
 	}
 	switch args[0] {
 	case "check":
@@ -40,8 +42,12 @@ func cmdHardenSec(args []string) error {
 			fmt.Printf("  %-26s %-14s %-30s %s\n", g.Tool, g.Status, g.Capability, g.Note)
 		}
 		return nil
+	case "appconfig":
+		return cmdHardenSecAppConfig(args[1:])
+	case "db":
+		return cmdHardenSecDB(args[1:])
 	default:
-		return fmt.Errorf("未知 sec 子命令: %s（可用 check|fix|rollback|gap）", args[0])
+		return fmt.Errorf("未知 sec 子命令: %s（可用 check|fix|rollback|appconfig|db|gap）", args[0])
 	}
 }
 
@@ -283,4 +289,112 @@ func printSecReport(rep *harden.SecReport, jsonOut string) error {
 		fmt.Printf("JSON 报告: %s\n", jsonOut)
 	}
 	return nil
+}
+
+// cmdHardenSecAppConfig 应用配置体检 / 白名单安全值写入。
+func cmdHardenSecAppConfig(args []string) error {
+	if len(args) == 0 || (args[0] != "check" && args[0] != "fix") {
+		return fmt.Errorf("用法: eops harden sec appconfig check|fix -c config.yaml [--host IP] [--yes]")
+	}
+	sub := args[0]
+	fs := flag.NewFlagSet("harden sec appconfig "+sub, flag.ExitOnError)
+	cfgPath := fs.String("c", "config.yaml", "配置文件")
+	host := fs.String("host", "all", "主机（IP / all / 逗号分隔）")
+	yes := fs.Bool("yes", false, "确认写入（默认 dry-run）")
+	manifest := fs.String("manifest-out", "", "备份 manifest 输出路径")
+	jsonOut := fs.String("json", "", "JSON 报告输出路径")
+	fs.Parse(args[1:])
+
+	cfg, err := config.Load(*cfgPath)
+	if err != nil {
+		return err
+	}
+	if err := gateValidation(cfg, *yes); err != nil {
+		return err
+	}
+	hosts := secHosts(cfg, *host)
+	if len(hosts) == 0 {
+		return fmt.Errorf("没有匹配的主机")
+	}
+	dial := secDialer(cfg)
+	rep := harden.NewSecReport("appconfig", hosts, time.Now())
+	for _, h := range hosts {
+		harden.SetCurrentHost(h, dial)
+		if sub == "check" {
+			harden.RunAppConfigCheck(h, rep)
+			continue
+		}
+		if ferr := harden.RunAppConfigFix(h, rep, *yes); ferr != nil {
+			rep.AddError(fmt.Sprintf("appconfig fix %s: %v", h, ferr))
+		}
+	}
+	rep.SortFindings()
+	if sub == "fix" && *manifest != "" && *yes {
+		b, jerr := json.MarshalIndent(harden.ManifestBackups(rep), "", "  ")
+		if jerr == nil {
+			_ = os.WriteFile(*manifest, append(b, '\n'), 0o644)
+			fmt.Printf("备份 manifest: %s\n", *manifest)
+		}
+	}
+	if sub == "fix" && !*yes {
+		fmt.Println("（dry-run 完成，未落盘；确认后加 --yes）")
+		return nil
+	}
+	return printSecReport(rep, *jsonOut)
+}
+
+// cmdHardenSecDB 数据库只读体检（凭据只走环境变量，不进命令行/不落盘）。
+func cmdHardenSecDB(args []string) error {
+	fs := flag.NewFlagSet("harden sec db", flag.ExitOnError)
+	cfgPath := fs.String("c", "config.yaml", "配置文件")
+	host := fs.String("host", "all", "数据库所在服务器（IP / all / 逗号分隔）")
+	typ := fs.String("type", "mysql", "数据库类型 mysql|dm|kingbase|highgo")
+	dbHost := fs.String("db-host", "127.0.0.1", "数据库地址（相对目标机）")
+	dbPort := fs.String("db-port", "", "数据库端口（默认按类型）")
+	dbUser := fs.String("db-user", "", "数据库账号")
+	dbName := fs.String("db-name", "", "数据库名（金仓/瀚高）")
+	pwEnv := fs.String("password-env", "EOPS_DB_PASSWORD", "口令所在环境变量名")
+	sqlOut := fs.String("sql-out", "remediation.sql", "整改 SQL 输出路径（空=不输出）")
+	jsonOut := fs.String("json", "", "JSON 报告输出路径")
+	fs.Parse(args)
+
+	opts := harden.NormalizeDB(harden.DBOptions{
+		Type: *typ, Host: *dbHost, Port: *dbPort, User: *dbUser,
+		Name: *dbName, Password: os.Getenv(*pwEnv),
+	})
+	if err := harden.ValidateDB(opts); err != nil {
+		return err
+	}
+	if opts.Password == "" {
+		fmt.Printf("（未设置 %s：将以空口令尝试连接；失败时请先 export %s=...）\n", *pwEnv, *pwEnv)
+	}
+
+	cfg, err := config.Load(*cfgPath)
+	if err != nil {
+		return err
+	}
+	if err := gateValidation(cfg, false); err != nil {
+		return err
+	}
+	hosts := secHosts(cfg, *host)
+	if len(hosts) == 0 {
+		return fmt.Errorf("没有匹配的主机")
+	}
+	dial := secDialer(cfg)
+	rep := harden.NewSecReport("db", hosts, time.Now())
+	for _, h := range hosts {
+		harden.SetCurrentHost(h, dial)
+		if derr := harden.RunDBCheck(h, opts, rep); derr != nil {
+			rep.AddError(fmt.Sprintf("db check %s: %v", h, derr))
+		}
+	}
+	rep.SortFindings()
+	if *sqlOut != "" && rep.Remediation != "" {
+		if werr := os.WriteFile(*sqlOut, []byte(rep.Remediation), 0o600); werr != nil {
+			fmt.Printf("⚠️ 整改 SQL 写入失败: %v\n", werr)
+		} else {
+			fmt.Printf("整改 SQL: %s\n", *sqlOut)
+		}
+	}
+	return printSecReport(rep, *jsonOut)
 }

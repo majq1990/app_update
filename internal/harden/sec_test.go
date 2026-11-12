@@ -27,10 +27,19 @@ type fakeSecRunner struct {
 }
 
 func (f fakeSecRunner) Run(cmd string) (string, error) {
+	// 确定性匹配：优先「命令中出现位置最靠前」的片段，同位置取更长片段。
+	// 避免 map 遍历随机导致同一命令命中多个片段时结果漂移。
+	bestPos, bestLen := -1, -1
+	bestOut := ""
 	for frag, out := range f.byFrag {
-		if strings.Contains(cmd, frag) {
-			return out, nil
+		if i := strings.Index(cmd, frag); i >= 0 {
+			if bestPos == -1 || i < bestPos || (i == bestPos && len(frag) > bestLen) {
+				bestPos, bestLen, bestOut = i, len(frag), out
+			}
 		}
+	}
+	if bestPos >= 0 {
+		return bestOut, nil
 	}
 	return f.defOut, nil
 }
