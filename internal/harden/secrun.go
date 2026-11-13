@@ -53,9 +53,19 @@ func SetCurrentHost(h string, fn func(string) (SecRunner, error)) {
 }
 
 // BackupEntry 一条备份记录（manifest 行）。
+// Created=true 表示该文件由本次修复新建，回滚时删除而非还原。
 type BackupEntry struct {
-	Origin string `json:"origin"`
-	Backup string `json:"backup"`
+	Host    string `json:"host,omitempty"`
+	Origin  string `json:"origin"`
+	Backup  string `json:"backup,omitempty"`
+	Created bool   `json:"created,omitempty"`
+}
+
+// BackupRef 报告内的一条备份/新建引用（带主机，便于多主机 manifest 分组）。
+type BackupRef struct {
+	Host    string `json:"host"`
+	Path    string `json:"path"`
+	Created bool   `json:"created,omitempty"`
 }
 
 // BackupRoot 远端备份根目录：/egova/eops-sec-backup/<host>/<ts>/...
@@ -85,7 +95,7 @@ func backupFile(host, path string, r *SecReport) (string, error) {
 	ts := secBackupTS()
 	remote := fmt.Sprintf("%s/%s/%s%s", BackupRoot, host, ts, path)
 	cmd := fmt.Sprintf(
-		`test -f %s || exit 0; mkdir -p %s && cp -a %s %s && echo COPIED`,
+		`test -f %s || exit 0; mkdir -p %s && cp -L -p %s %s && echo COPIED`,
 		sq(path), sq(fmt.Sprintf("%s/%s/%s", BackupRoot, host, ts)+dirOf(path)),
 		sq(path), sq(remote))
 	out, err := remoteRun(cmd)
@@ -95,7 +105,7 @@ func backupFile(host, path string, r *SecReport) (string, error) {
 	if !strings.Contains(out, "COPIED") {
 		return "", nil // 文件不存在，无需备份
 	}
-	r.Backups = append(r.Backups, remote)
+	r.Backups = append(r.Backups, BackupRef{Host: host, Path: remote})
 	return remote, nil
 }
 
@@ -123,17 +133,27 @@ func secPathOK(p string) bool {
 // sq 单引号强引用。
 func sq(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
-// RollbackCommand 按备份清单生成回滚命令（cp -a 备份 → 原路径）。
+// RollbackCommand 按备份清单生成回滚命令（cp -a 备份 → 原路径；新建文件 rm -f）。
 func RollbackCommand(backups []BackupEntry) (string, error) {
 	if len(backups) == 0 {
 		return "", fmt.Errorf("备份清单为空，无可回滚项")
 	}
 	var parts []string
 	for _, b := range backups {
+		if b.Created {
+			if !secPathOK(b.Origin) {
+				return "", fmt.Errorf("回滚清单含非法路径: %q", b.Origin)
+			}
+			parts = append(parts, fmt.Sprintf("rm -f %s", sq(b.Origin)))
+			continue
+		}
+		if b.Backup == "" {
+			return "", fmt.Errorf("回滚项缺少备份文件: %q", b.Origin)
+		}
 		if !secPathOK(b.Origin) || !secPathOK(b.Backup) {
 			return "", fmt.Errorf("回滚清单含非法路径: %q", b.Origin)
 		}
-		parts = append(parts, fmt.Sprintf("cp -a %s %s", sq(b.Backup), sq(b.Origin)))
+		parts = append(parts, fmt.Sprintf("cp -f %s %s", sq(b.Backup), sq(b.Origin)))
 	}
 	return "set -e; " + strings.Join(parts, " && ") + " && echo ROLLBACK_OK", nil
 }
@@ -157,20 +177,20 @@ func validateAndRollback(host string, validator string, backups []BackupEntry, r
 	if err2 != nil {
 		return fmt.Errorf("校验失败，自动还原失败: %v（备份仍在 %s/%s）", err2, BackupRoot, secBackupTS())
 	}
-	sort.Strings(r.Backups)
+	sort.SliceStable(r.Backups, func(i, j int) bool { return r.Backups[i].Path < r.Backups[j].Path })
 	r.Add(SecFinding{Host: host, Category: "回滚", Item: "校验失败自动还原",
 		Result: strings.TrimSpace(firstLine(out2)), Level: SecInfo, Fixable: "no"})
 	return fmt.Errorf("校验失败已自动还原（备份 %s/%s）：%s", BackupRoot, secBackupTS(), strings.TrimSpace(firstLine(out)))
 }
 
 // ensureBlock 幂等配置块写入（等价 harden_lib 的幂等配置块）：BEGIN/END 标记之间内容不存在则追加。
+// 注意：内容必须经 printf 输出，不能把单引号字符串当命令执行。
 func ensureBlock(path, marker, content string) (string, error) {
 	if !secPathOK(path) || strings.ContainsAny(marker, "'") {
 		return "", fmt.Errorf("参数非法: %q / %q", path, marker)
 	}
+	block := "# BEGIN " + marker + "\n" + content + "\n# END " + marker + "\n"
 	return fmt.Sprintf(
-		"grep -q '# BEGIN %s' %s 2>/dev/null || { %s >> %s; }",
-		marker, sq(path),
-		sq("# BEGIN "+marker+"\n"+content+"\n# END "+marker+"\n"),
-		sq(path)), nil
+		"grep -qF %s %s 2>/dev/null || printf '%%s' %s >> %s",
+		sq("# BEGIN "+marker), sq(path), sq(block), sq(path)), nil
 }

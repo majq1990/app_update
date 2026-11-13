@@ -24,9 +24,13 @@ func captureStdout(fn func()) string {
 type fakeSecRunner struct {
 	byFrag map[string]string // 命令片段 → 输出（Contains 匹配）
 	defOut string
+	cmds   *[]string // 可选：记录执行过的命令（断言命令形状用）
 }
 
 func (f fakeSecRunner) Run(cmd string) (string, error) {
+	if f.cmds != nil {
+		*f.cmds = append(*f.cmds, cmd)
+	}
 	// 确定性匹配：优先「命令中出现位置最靠前」的片段，同位置取更长片段。
 	// 避免 map 遍历随机导致同一命令命中多个片段时结果漂移。
 	bestPos, bestLen := -1, -1
@@ -245,7 +249,7 @@ func TestRollbackCommandShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(cmd, "cp -a '/egova/eops-sec-backup/10.0.0.1/20261112/etc/nginx/nginx.conf' '/etc/nginx/nginx.conf'") {
+	if !strings.Contains(cmd, "cp -f '/egova/eops-sec-backup/10.0.0.1/20261112/etc/nginx/nginx.conf' '/etc/nginx/nginx.conf'") {
 		t.Fatalf("回滚命令形态错误: %s", cmd)
 	}
 	if _, err := RollbackCommand(nil); err == nil {

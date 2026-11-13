@@ -225,6 +225,82 @@ func TestDBFindPGTrust(t *testing.T) {
 	}
 }
 
+func TestOSDangerousServicesInactive(t *testing.T) {
+	// 远端命令必须 grep -cx 'active' 精确匹配，否则 "inactive" 会被误计
+	var cmds []string
+	fr := fakeSecRunner{
+		byFrag: map[string]string{"is-active telnet": "0"},
+		cmds:   &cmds,
+	}
+	withFakeHost(t, "h1", fr)
+	r := NewSecReport("os", []string{"h1"}, time.Now())
+	RunOSCheck("h1", r)
+
+	exact := false
+	for _, c := range cmds {
+		if strings.Contains(c, "grep -cx 'active'") {
+			exact = true
+		}
+	}
+	if !exact {
+		t.Fatalf("危险服务检查必须精确匹配 active，实际命令: %v", cmds)
+	}
+	for _, f := range r.Findings {
+		if f.Item == "危险服务在运行" {
+			t.Fatalf("inactive 不应判为危险服务在运行: %+v", f)
+		}
+	}
+}
+
+func TestRollbackCommandCreatedFile(t *testing.T) {
+	r := NewSecReport("nginx", []string{"h"}, time.Now())
+	r.Backups = append(r.Backups,
+		BackupRef{Host: "h", Path: "/etc/nginx/conf.d/00-egova-security-locations.conf", Created: true},
+		BackupRef{Host: "h", Path: "/egova/eops-sec-backup/h/20261113/etc/nginx/nginx.conf"},
+	)
+	entries := ManifestBackups(r)
+	if len(entries) != 2 {
+		t.Fatalf("manifest 条目数错误: %+v", entries)
+	}
+	if !entries[0].Created || entries[0].Host != "h" {
+		t.Fatalf("新建文件条目错误: %+v", entries[0])
+	}
+	if entries[1].Origin != "/etc/nginx/nginx.conf" || entries[1].Backup == "" {
+		t.Fatalf("备份文件条目错误: %+v", entries[1])
+	}
+	cmd, err := RollbackCommand(entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(cmd, "rm -f '/etc/nginx/conf.d/00-egova-security-locations.conf'") {
+		t.Fatalf("回滚应删除新建片段: %s", cmd)
+	}
+	if !strings.Contains(cmd, "cp -f '/egova/eops-sec-backup/h/20261113/etc/nginx/nginx.conf' '/etc/nginx/nginx.conf'") {
+		t.Fatalf("回滚应还原备份: %s", cmd)
+	}
+}
+
+func TestFilterHTTPBlock(t *testing.T) {
+	existing := `http {
+    server_tokens off;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+}`
+	block := `server_tokens off;
+autoindex off;
+add_header X-Content-Type-Options "nosniff" always;
+add_header X-Frame-Options "SAMEORIGIN" always;`
+	got := filterHTTPBlock(existing, block)
+	if strings.Contains(got, "server_tokens") {
+		t.Fatalf("已存在的 server_tokens 应跳过: %s", got)
+	}
+	if strings.Contains(got, "X-Frame-Options") {
+		t.Fatalf("已存在的响应头应跳过: %s", got)
+	}
+	if !strings.Contains(got, "X-Content-Type-Options") || !strings.Contains(got, "autoindex off") {
+		t.Fatalf("缺失的指令应保留: %s", got)
+	}
+}
+
 func TestNormalizeAndValidateDB(t *testing.T) {
 	o := NormalizeDB(DBOptions{Type: "MySQL"})
 	if o.Type != "mysql" || o.Port != "3306" || o.User != "root" || o.Host != "127.0.0.1" {

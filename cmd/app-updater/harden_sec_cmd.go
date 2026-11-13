@@ -258,7 +258,10 @@ func cmdHardenSecRollback(args []string) error {
 	byHost := map[string][]harden.BackupEntry{}
 	order := []string{}
 	for _, e := range entries {
-		h := hostOfBackup(e.Backup)
+		h := e.Host
+		if h == "" {
+			h = hostOfBackup(e.Backup)
+		}
 		if _, ok := byHost[h]; !ok {
 			order = append(order, h)
 		}

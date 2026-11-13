@@ -81,7 +81,7 @@ type SecReport struct {
 	Hosts       []string       `json:"hosts"`
 	Findings    []SecFinding   `json:"findings"`
 	Summary     map[string]int `json:"summary"`               // level → count
-	Backups     []string       `json:"backups,omitempty"`     // 修改类任务产生的备份路径
+	Backups     []BackupRef    `json:"backups,omitempty"`     // 修改类任务产生的备份/新建文件
 	Remediation string         `json:"remediation,omitempty"` // DB 任务生成的整改 SQL
 
 	errorList []string // 执行错误（不序列化，终端展示用）

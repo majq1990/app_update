@@ -108,7 +108,7 @@ func RunOSCheck(host string, r *SecReport) {
 	}
 
 	// ---- 危险服务 ----
-	out, _ = remoteRun(`systemctl is-active telnet.socket rsh.socket rlogin.socket vsftpd tftp 2>/dev/null | grep -c active`)
+	out, _ = remoteRun(`systemctl is-active telnet.socket rsh.socket rlogin.socket vsftpd tftp 2>/dev/null | grep -cx 'active'`)
 	if n := strings.TrimSpace(out); n != "0" {
 		rec(SecHigh, "服务", "危险服务在运行", "telnet/rsh/vsftpd/tftp 有 active", "",
 			"systemctl disable --now <服务>（改用 ssh/sftp）", "no")
