@@ -24,12 +24,16 @@ func captureStdout(fn func()) string {
 type fakeSecRunner struct {
 	byFrag map[string]string // 命令片段 → 输出（Contains 匹配）
 	defOut string
-	cmds   *[]string // 可选：记录执行过的命令（断言命令形状用）
+	cmds   *[]string                    // 可选：记录执行过的命令（断言命令形状用）
+	fn     func(string) (string, error) // 可选：完全自定义响应（优先于 byFrag）
 }
 
 func (f fakeSecRunner) Run(cmd string) (string, error) {
 	if f.cmds != nil {
 		*f.cmds = append(*f.cmds, cmd)
+	}
+	if f.fn != nil {
+		return f.fn(cmd)
 	}
 	// 确定性匹配：优先「命令中出现位置最靠前」的片段，同位置取更长片段。
 	// 避免 map 遍历随机导致同一命令命中多个片段时结果漂移。

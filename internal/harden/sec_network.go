@@ -60,36 +60,108 @@ func RunNetworkStatus(host string, r *SecReport) {
 	rec(SecInfo, "封禁集合 "+banSet, fmt.Sprintf("%s 个 IP（24h 自动解封）", kv["ban"]), "")
 	rec(SecInfo, "INPUT 挂载", ternary(kv["chain_in"] != "0", "已挂载", "未挂载"), "")
 
-	// docker 暴露端口
+	// docker 暴露端口（已由 DOCKER-USER 限源的降为信息）
+	guarded := guardedPorts()
 	dOut, _ := remoteRun(`docker ps --format '{{.Names}}|{{.Ports}}' 2>/dev/null | head -10`)
 	for _, ln := range strings.Split(dOut, "\n") {
 		f := strings.SplitN(strings.TrimSpace(ln), "|", 2)
 		if len(f) != 2 || f[0] == "" {
 			continue
 		}
-		if strings.Contains(f[1], "0.0.0.0:") {
-			rec(SecHigh, "Docker "+f[0]+" 发布端口", "对全网暴露（绕过 firewalld）", strings.TrimSpace(f[1]))
+		if !strings.Contains(f[1], "0.0.0.0:") {
+			continue
 		}
+		ports := publishedHostPorts(f[1])
+		var un []string
+		for _, p := range ports {
+			if !guarded[p] {
+				un = append(un, p)
+			}
+		}
+		if len(ports) > 0 && len(un) == 0 {
+			rec(SecInfo, "Docker "+f[0]+" 发布端口",
+				"已由 DOCKER-USER 限源至内网/VPC（"+strings.Join(ports, ",")+"）", "")
+			continue
+		}
+		rec(SecHigh, "Docker "+f[0]+" 发布端口", "对全网暴露（绕过 firewalld）",
+			"未限源端口: "+strings.Join(un, ",")+" | "+strings.TrimSpace(f[1]))
 	}
 
 	// 可疑 IP TOP
 	badOut, _ := remoteRun(badIPsCmd())
-	top := 0
-	for _, ln := range strings.Split(badOut, "\n") {
-		fields := strings.Fields(strings.TrimSpace(ln))
-		if len(fields) >= 2 {
-			top++
-		}
-		if top > 5 {
-			break
-		}
-	}
-	if top > 0 {
-		rec(SecMedium, "可疑 IP（≥"+itoa(banThreshold)+" 次）", fmt.Sprintf("检测到 %d 个，harden network ban --yes 执行封禁", top), "")
+	ips := parseBadIPs(badOut)
+	if len(ips) > 0 {
+		rec(SecMedium, "可疑 IP（≥"+itoa(banThreshold)+" 次）", fmt.Sprintf("检测到 %d 个，harden network ban --yes 执行封禁", len(ips)), strings.Join(ips[:minInt(5, len(ips))], ", "))
 	} else {
 		r.Add(SecFinding{Host: host, Category: "网络拦截", Item: "可疑 IP",
 			Result: "未达到封禁阈值", Level: SecInfo, Fixable: "no"})
 	}
+}
+
+// publishedHostPorts 从 docker ps 的 Ports 字段解析宿主端口（含范围展开）。
+// 形如 "0.0.0.0:8848->8848/tcp, [::]:2379-2380->2379-2380/tcp"。
+func publishedHostPorts(s string) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(p string) {
+		if p != "" && !seen[p] {
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	for _, part := range strings.Split(s, ",") {
+		part = strings.TrimSpace(part)
+		i := strings.Index(part, "->")
+		if i < 0 {
+			continue
+		}
+		left := part[:i]
+		if !strings.HasPrefix(left, "0.0.0.0:") {
+			continue
+		}
+		j := strings.LastIndex(left, ":")
+		if j < 0 {
+			continue
+		}
+		ps := left[j+1:]
+		if k := strings.Index(ps, "-"); k > 0 {
+			a, e1 := strconv.Atoi(ps[:k])
+			b, e2 := strconv.Atoi(ps[k+1:])
+			if e1 == nil && e2 == nil && b >= a && b-a <= 100 {
+				for n := a; n <= b; n++ {
+					add(strconv.Itoa(n))
+				}
+			}
+			continue
+		}
+		add(ps)
+	}
+	return out
+}
+
+// parseBadIPs 解析 badIPsCmd 输出（unbound: "次数 IP"），只保留合法 IPv4，去重。
+// status 与 ban 共用，保证两处计数一致。
+func parseBadIPs(out string) []string {
+	seen := map[string]bool{}
+	var ips []string
+	for _, ln := range strings.Split(out, "\n") {
+		f := strings.Fields(strings.TrimSpace(ln))
+		if len(f) < 2 || !isDigits(f[0]) || !isIPv4(f[1]) {
+			continue
+		}
+		if !seen[f[1]] {
+			seen[f[1]] = true
+			ips = append(ips, f[1])
+		}
+	}
+	return ips
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // badIPsCmd 恶意 IP 统计（nginx 401/403/444/404 + sshd Failed password，取 ≥阈值）。
@@ -207,18 +279,7 @@ func RunNetworkDocker(host string, r *SecReport, yes bool) error {
 		if len(f) != 2 {
 			continue
 		}
-		for _, seg := range strings.Split(f[1], ",") {
-			seg = strings.TrimSpace(seg)
-			if i := strings.Index(seg, "0.0.0.0:"); i >= 0 {
-				rest := seg[i+len("0.0.0.0:"):]
-				if j := strings.IndexByte(rest, '-'); j > 0 {
-					rest = rest[:j]
-				}
-				if rest != "" && isDigits(rest) {
-					exposed = append(exposed, rest)
-				}
-			}
-		}
+		exposed = append(exposed, publishedHostPorts(f[1])...)
 	}
 	if len(exposed) == 0 {
 		r.Add(SecFinding{Host: host, Category: "容器", Item: "端口收敛",
@@ -267,12 +328,7 @@ func RunNetworkBan(host string, r *SecReport, yes, installCron bool) error {
 		return err
 	}
 	var ips []string
-	for _, ln := range strings.Split(out, "\n") {
-		fields := strings.Fields(strings.TrimSpace(ln))
-		if len(fields) >= 2 && isDigits(fields[0]) {
-			ips = append(ips, fields[1])
-		}
-	}
+	ips = parseBadIPs(out)
 	var willBan []string
 	for _, ip := range ips {
 		if !isIPv4(ip) || isPrivateIPv4(ip) {

@@ -173,6 +173,7 @@ func cmdHardenSecCheck(args []string) error {
 		harden.RunExposureCheck(h, rep)
 		harden.RunNginxCheck(h, rep)
 		harden.RunTomcatCheck(h, rep)
+		harden.RunCNStatus(h, rep)
 	}
 	rep.SortFindings()
 	return printSecReport(rep, *jsonOut)

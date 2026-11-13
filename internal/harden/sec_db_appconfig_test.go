@@ -82,12 +82,56 @@ func TestRunAppConfigCheck(t *testing.T) {
 	}
 }
 
+func TestRunAppConfigFixAlreadySafe(t *testing.T) {
+	scanOut := `##SWAGGER
+/egova/app/conf/a.properties:4:swagger.enable=false
+##END
+##END
+`
+	fr := fakeSecRunner{fn: func(cmd string) (string, error) {
+		if strings.Contains(cmd, "scan()") {
+			return scanOut, nil
+		}
+		return "yes", nil // 键存在且已是安全值
+	}}
+	withFakeHost(t, "10.0.0.9", fr)
+	r := NewSecReport("appconfig", []string{"10.0.0.9"}, time.Now())
+	if err := RunAppConfigFix("10.0.0.9", r, false); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Backups) != 0 {
+		t.Fatalf("已是安全值不应备份: %v", r.Backups)
+	}
+	found := false
+	for _, f := range r.Findings {
+		if strings.Contains(f.Result, "已是安全值") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("应报告已是安全值: %+v", r.Findings)
+	}
+}
+
 func TestRunAppConfigFixDryRun(t *testing.T) {
-	fr := fakeSecRunner{byFrag: map[string]string{"scan()": `##SWAGGER
+	scanOut := `##SWAGGER
 /egova/app/conf/a.properties:4:swagger.enable=true
 ##END
 ##END
-`}}
+`
+	fr := fakeSecRunner{fn: func(cmd string) (string, error) {
+		if strings.Contains(cmd, "scan()") {
+			return scanOut, nil
+		}
+		if strings.Contains(cmd, "swagger.enable") {
+			// 安全值判断（*false）返回空 → 视为不安全；存在性判断返回 yes
+			if strings.Contains(cmd, "false[[:space:]]*$") {
+				return "", nil
+			}
+			return "yes", nil
+		}
+		return "", nil
+	}}
 	withFakeHost(t, "10.0.0.9", fr)
 	r := NewSecReport("appconfig", []string{"10.0.0.9"}, time.Now())
 	out := captureStdout(func() { _ = RunAppConfigFix("10.0.0.9", r, false) })

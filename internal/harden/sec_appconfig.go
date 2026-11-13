@@ -362,6 +362,32 @@ func RunAppConfigFix(host string, r *SecReport, yes bool) error {
 		return nil
 	}
 
+	// 只保留「键存在且当前值不是安全值」的文件，避免无意义备份与改写
+	var need []string
+	for _, f := range files2 {
+		dirty := false
+		for _, rule := range appCfgFixRules {
+			exists, _ := remoteRun(fmt.Sprintf(`grep -qiE '^[[:space:]]*%s[[:space:]]*[=:]' %s && echo yes || true`, rule.Key, sq(f)))
+			if strings.TrimSpace(exists) == "" {
+				continue
+			}
+			safe, _ := remoteRun(fmt.Sprintf(`grep -qiE '^[[:space:]]*%s[[:space:]]*[=:][[:space:]]*%s[[:space:]]*$' %s && echo yes || true`, rule.Key, rule.Value, sq(f)))
+			if strings.TrimSpace(safe) == "" {
+				dirty = true
+				break
+			}
+		}
+		if dirty {
+			need = append(need, f)
+		}
+	}
+	if len(need) == 0 {
+		r.Add(SecFinding{Host: host, Category: "应用配置", Item: "安全值写入",
+			Result: "已是安全值，无需修改", Level: SecInfo, Fixable: "no"})
+		return nil
+	}
+	files2 = need
+
 	// 单次 SSH 下发执行：逐文件、逐白名单键「存在才改值」，避免键不存在时新增
 	var sb strings.Builder
 	sb.WriteString("set -u\n")

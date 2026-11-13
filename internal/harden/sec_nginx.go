@@ -209,7 +209,9 @@ func filterHTTPBlock(existing, block string) string {
 func RunNginxFix(host string, r *SecReport, yes bool) error {
 	dir, err := detectNginxConfDir()
 	if err != nil {
-		return fmt.Errorf("nginx fix: %w", err)
+		r.Add(SecFinding{Host: host, Category: "Nginx", Item: "配置探测",
+			Result: "未发现 nginx（跳过 nginx 加固）", Level: SecInfo, Fixable: "no"})
+		return nil
 	}
 	// 收集需注入 include 的 server 配置文件
 	out, _ := remoteRun(fmt.Sprintf(`grep -RlE '^[[:space:]]*server[[:space:]]*\{' %s --include='*.conf' 2>/dev/null | grep -v 00-egova-security | head -10`, sq(dir)))

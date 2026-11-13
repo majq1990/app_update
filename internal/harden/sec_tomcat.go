@@ -106,7 +106,9 @@ func checkOneTomcat(host, base string, r *SecReport) {
 func RunTomcatFix(host string, r *SecReport, yes bool) error {
 	bases := tomcatBases()
 	if len(bases) == 0 {
-		return fmt.Errorf("tomcat fix: 未发现实例")
+		r.Add(SecFinding{Host: host, Category: "Tomcat", Item: "实例发现",
+			Result: "未发现 catalina.base（jar 应用，跳过 tomcat 加固）", Level: SecInfo, Fixable: "no"})
+		return nil
 	}
 	type step struct {
 		desc, cmd string
