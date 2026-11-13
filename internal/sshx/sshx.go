@@ -39,7 +39,8 @@ func (c *Client) RunWithStdin(cmd string, stdin []byte) (string, error) {
 		return "", fmt.Errorf("启动命令失败: %w", err)
 	}
 	if len(stdin) > 0 {
-		if _, werr := w.Write(stdin); werr != nil {
+		// 用 io.Copy 兜住 SSH channel 的短写（单次 Write 可能只写一部分）
+		if _, werr := io.Copy(w, bytes.NewReader(stdin)); werr != nil {
 			return "", fmt.Errorf("写入 stdin 失败: %w", werr)
 		}
 	}

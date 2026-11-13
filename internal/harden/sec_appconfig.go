@@ -396,7 +396,12 @@ func RunAppConfigFix(host string, r *SecReport, yes bool) error {
 	if rerr != nil {
 		return rerr
 	}
-	out2, aerr := rn.RunWithStdin("bash -s", []byte(script))
+	tmp := "/tmp/.eops_ac_apply.sh"
+	if _, werr := rn.RunWithStdin(fmt.Sprintf(`cat > %s`, sq(tmp)), []byte(script)); werr != nil {
+		return fmt.Errorf("appconfig fix 下发脚本失败: %w", werr)
+	}
+	out2, aerr := remoteRun(fmt.Sprintf(`bash %s`, sq(tmp)))
+	_, _ = remoteRun(fmt.Sprintf(`rm -f %s`, sq(tmp)))
 	if aerr != nil || !strings.Contains(out2, "APPLY_DONE") {
 		return fmt.Errorf("appconfig fix 写入失败: %v %s", aerr, strings.TrimSpace(out2))
 	}

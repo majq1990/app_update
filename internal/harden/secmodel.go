@@ -186,7 +186,7 @@ func GapTable() []GapRow {
 		{Tool: "scan_vulnerable_jar", Capability: "高危 jar 扫描", Status: "covered", Note: "inspect ac-vulnerable-jar（auto-check 资产，按应用目录）"},
 		{Tool: "check_safe_config", Capability: "产品安全配置开关体检", Status: "covered", Note: "eops harden sec appconfig check|fix（sec_appconfig.go，9 类规则）"},
 		{Tool: "enhance_middleware", Capability: "东方通/金蝶中间件加固", Status: "missing", Note: "延后：现场无东方通/金蝶环境；检测点已并入 tomcat 基线（9060/6888/6900 提示）"},
-		{Tool: "cn_whitelist", Capability: "中国 IP 白名单", Status: "missing", Note: "延后：境外拦截属网络策略决策，需用户拍板白名单口径（可用 network guard 的 ipset 机制承载）"},
+		{Tool: "cn_whitelist", Capability: "中国 IP 白名单（境外默认拉黑）", Status: "missing→covered", Note: "eops harden sec cn status|enable|disable（sec_cn.go，内置 8786 条 CN 网段 + allow 集合，挂 INPUT/DOCKER-USER）"},
 		{Tool: "fastjson", Capability: "fastjson 扫描/启动配置", Status: "partial", Note: "inspect ac-vulnerable-jar 覆盖检测；启动配置处理延后到 harden apply（改启动参数需重启）"},
 		{Tool: "harden_nginx(新增)", Capability: "nginx 基线 check/fix/rollback", Status: "missing→covered", Note: "eops harden sec check|fix|rollback（sec_nginx.go）"},
 		{Tool: "harden_tomcat(新增)", Capability: "tomcat 基线 check/fix/rollback", Status: "missing→covered", Note: "eops harden sec check|fix|rollback（sec_tomcat.go）"},

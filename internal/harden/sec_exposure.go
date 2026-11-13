@@ -25,12 +25,16 @@ var highRiskPorts = map[string]struct {
 	"54321": {"人大金仓", "数据库端口暴露", "仅允许应用服务器 IP 访问", true},
 	"5866":  {"瀚高", "数据库端口暴露", "仅允许应用服务器 IP 访问", true},
 	"6379":  {"Redis", "端口对全网暴露（需确认 requirepass）", "开启 requirepass 并限源", true},
+	"6380":  {"Redis(备用口)", "端口对全网暴露（需确认 requirepass）", "开启 requirepass 并限源", true},
+	"26379": {"Redis Sentinel", "哨兵端口对全网暴露", "限源并配置认证", true},
 	"9200":  {"Elasticsearch", "端口对全网暴露（需确认认证）", "开启认证并限源", true},
 	"9300":  {"ES 传输", "集群传输端口暴露", "仅集群内网互通", true},
 	"2181":  {"ZooKeeper", "端口对全网暴露（需确认 ACL）", "限源并启用 ACL", true},
 	"2888":  {"ZK 集群", "集群端口暴露", "仅集群内网互通", true},
 	"3888":  {"ZK 选举", "选举端口暴露", "仅集群内网互通", true},
 	"9092":  {"Kafka", "端口对全网暴露（需确认 SASL）", "限源，开启 SASL", true},
+	"9093":  {"Kafka SSL", "SSL 端口对全网暴露（需确认 SASL）", "限源，开启 SASL", true},
+	"2379":  {"etcd", "键值库端口对全网暴露", "开启认证并限源", true},
 	"8848":  {"Nacos", "端口对全网暴露（需确认默认口令）", "改默认口令+限源", true},
 	"9848":  {"Nacos gRPC", "客户端端口暴露", "限源", true},
 	"2375":  {"Docker API", "远程 API 对全网暴露（等同 root 风险）", "关闭远程 API 或启用 TLS", true},
@@ -73,8 +77,20 @@ func parseListeningPorts(out string) []string {
 	return ports
 }
 
+// guardedPorts 已被 iptables 限源（EGOVA-SEC-GUARD / DOCKER-USER）的高危端口集合。
+func guardedPorts() map[string]bool {
+	out, _ := remoteRun(`iptables-save 2>/dev/null | grep -E 'EGOVA-SEC-GUARD|DOCKER-USER' | grep -oE 'dport [0-9]+' | awk '{print $2}' | sort -u`)
+	m := map[string]bool{}
+	for _, ln := range strings.Split(out, "\n") {
+		if p := strings.TrimSpace(ln); p != "" {
+			m[p] = true
+		}
+	}
+	return m
+}
+
 // checkExposurePorts 高危端口字典比对。
-func checkExposurePorts(ports []string, protected map[string]bool, host string, r *SecReport) {
+func checkExposurePorts(ports []string, protected, guarded map[string]bool, host string, r *SecReport) {
 	for _, p := range ports {
 		hr, risky := highRiskPorts[p]
 		if !risky {
@@ -83,6 +99,12 @@ func checkExposurePorts(ports []string, protected map[string]bool, host string, 
 		if protected[p] {
 			r.Add(SecFinding{Host: host, Category: "暴露面", Item: "高危端口 " + p + "(" + hr.Svc + ")",
 				Result: "已登记 egova-expose-ports 白名单", Level: SecInfo, Fixable: "no"})
+			continue
+		}
+		if guarded[p] {
+			r.Add(SecFinding{Host: host, Category: "暴露面", Item: "高危端口 " + p + "(" + hr.Svc + ")",
+				Result: "监听在全部网卡，但已由 iptables 限源至内网/VPC", Evidence: "iptables EGOVA-SEC-GUARD/DOCKER-USER",
+				Advice: "如需彻底收敛可改 bind 内网地址", Level: SecInfo, Fixable: "no"})
 			continue
 		}
 		r.Add(SecFinding{Host: host, Category: "暴露面", Item: "高危端口 " + p + "(" + hr.Svc + ")",
@@ -138,7 +160,7 @@ func RunExposureCheck(host string, r *SecReport) {
 	ports := parseListeningPorts(out)
 	r.Add(SecFinding{Host: host, Category: "暴露面", Item: "监听端口采集",
 		Result: fmt.Sprintf("%d 个端口", len(ports)), Level: SecInfo, Fixable: "no"})
-	checkExposurePorts(ports, protected, host, r)
+	checkExposurePorts(ports, protected, guardedPorts(), host, r)
 
 	// 2) 未授权主动探测（仅对在监听的端口）
 	listening := map[string]bool{}

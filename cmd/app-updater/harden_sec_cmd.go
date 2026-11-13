@@ -35,7 +35,7 @@ var (
 
 func cmdHardenSec(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("用法: eops harden sec check|fix|rollback|appconfig|db|os|network|gap -c config.yaml [--host IP] [--yes]")
+		return fmt.Errorf("用法: eops harden sec check|fix|rollback|appconfig|db|os|network|cn|gap -c config.yaml [--host IP] [--yes]")
 	}
 	switch args[0] {
 	case "check":
@@ -55,6 +55,8 @@ func cmdHardenSec(args []string) error {
 		return cmdHardenSecAppConfig(args[1:])
 	case "db":
 		return cmdHardenSecDB(args[1:])
+	case "cn":
+		return cmdHardenSecCN(args[1:])
 	case "os":
 		return cmdHardenSecOS(args[1:])
 	case "network":

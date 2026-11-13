@@ -80,6 +80,14 @@ export EOPS_DB_PASSWORD='<口令>'
 ./eops harden sec gap
 ```
 
+境外 IP 默认拉黑（内置 8786 条中国网段，挂 INPUT/DOCKER-USER）：
+
+```bash
+./eops harden sec cn status -c config.yaml
+./eops harden sec cn enable -c config.yaml --allow 203.0.113.10/32,172.21.133.0/24 --yes
+./eops harden sec cn disable -c config.yaml --yes
+```
+
 > SSH 认证默认用 `~/.ssh/id_rsa`；密钥不是默认名时加 `--key <私钥路径>`，
 > 口令登录用 `--pass` 或环境变量 `APP_UPDATER_SSH_PASS`。
 > `os/network` 的写操作同样默认 dry-run，`--yes` 才落盘；`network guard/docker`
