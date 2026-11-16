@@ -175,6 +175,7 @@ func cmdHardenSecCheck(args []string) error {
 		harden.SetCurrentHost(h, dial)
 		harden.RunExposureCheck(h, rep)
 		harden.RunNginxCheck(h, rep)
+		harden.RunNginxNacosProxyCheck(h, rep)
 		harden.RunTomcatCheck(h, rep)
 		harden.RunCNStatus(h, rep)
 	}
@@ -212,6 +213,9 @@ func cmdHardenSecFix(args []string) error {
 		harden.SetCurrentHost(h, dial)
 		if err := harden.RunNginxFix(h, rep, *yes); err != nil {
 			rep.AddError(fmt.Sprintf("nginx fix %s: %v", h, err))
+		}
+		if err := harden.RunNginxNacosProxyFix(h, rep, *yes); err != nil {
+			rep.AddError(fmt.Sprintf("nacos-proxy fix %s: %v", h, err))
 		}
 		if err := harden.RunTomcatFix(h, rep, *yes); err != nil {
 			rep.AddError(fmt.Sprintf("tomcat fix %s: %v", h, err))
