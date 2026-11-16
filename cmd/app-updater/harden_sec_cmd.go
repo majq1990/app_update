@@ -10,6 +10,7 @@ package main
 //	eops harden sec db [hosts] --type mysql|dm|kingbase|highgo  数据库只读体检
 //	eops harden sec os check|fix [hosts]  系统基线（口令/SSH/审计），fix 需 --yes
 //	eops harden sec network status|docker|guard|ban|unban  网络层拦截（默认 dry-run）
+//	eops harden sec knowledge check|fetch  知识库三类复检（代码只读复现/依赖在线离线/配置聚合）
 //	eops harden sec gap              输出 oneinstall 安全工具箱能力对照表
 //
 // 红线：SSH 登录方式不改（无密钥确认不碰）；数据库只读；拦截链可整链回退。
@@ -35,7 +36,7 @@ var (
 
 func cmdHardenSec(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("用法: eops harden sec check|fix|rollback|appconfig|db|os|network|cn|gap -c config.yaml [--host IP] [--yes]")
+		return fmt.Errorf("用法: eops harden sec check|fix|rollback|appconfig|db|os|network|cn|knowledge|gap -c config.yaml [--host IP] [--yes]")
 	}
 	switch args[0] {
 	case "check":
@@ -61,8 +62,10 @@ func cmdHardenSec(args []string) error {
 		return cmdHardenSecOS(args[1:])
 	case "network":
 		return cmdHardenSecNetwork(args[1:])
+	case "knowledge":
+		return cmdHardenSecKnowledge(args[1:])
 	default:
-		return fmt.Errorf("未知 sec 子命令: %s（可用 check|fix|rollback|appconfig|db|os|network|gap）", args[0])
+		return fmt.Errorf("未知 sec 子命令: %s（可用 check|fix|rollback|appconfig|db|os|network|knowledge|gap）", args[0])
 	}
 }
 
@@ -553,5 +556,119 @@ func cmdHardenSecNetwork(args []string) error {
 		fmt.Println("（dry-run 完成，未落盘；确认后加 --yes）")
 		return nil
 	}
+	return printSecReport(rep, *jsonOut)
+}
+
+// cmdHardenSecKnowledge 知识库三类复检：
+// eops harden sec knowledge check -c config.yaml [--host IP] [--target https://...]
+//
+//	  [--token-mis X --citizen-token Y] [--scan-dir /egova/apps,/egova/web]
+//	  [--company-db 公司版本库.json] [--maven-cache 互联网最新版.json] [--json 报告.json]
+//	配置类复用已有体检 + 依赖 jar 扫描 + 代码只读复现，一次输出哪些修复/哪些没修复。
+//
+// eops harden sec knowledge fetch [--company-db X] --out maven_latest.json
+//
+//	联网拉 Maven Central 最新版本存文件，导入离线环境做 --maven-cache 比对。
+func cmdHardenSecKnowledge(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("用法: eops harden sec knowledge check|fetch [选项]")
+	}
+	switch args[0] {
+	case "fetch":
+		return cmdHardenSecKnowledgeFetch(args[1:])
+	case "check":
+		return cmdHardenSecKnowledgeCheck(args[1:])
+	default:
+		return fmt.Errorf("未知 knowledge 子命令: %s（可用 check|fetch）", args[0])
+	}
+}
+
+func cmdHardenSecKnowledgeFetch(args []string) error {
+	fs := flag.NewFlagSet("harden sec knowledge fetch", flag.ExitOnError)
+	companyDB := fs.String("company-db", "", "公司版本库 JSON（缺省用内置 14 项基线）")
+	out := fs.String("out", "maven_latest.json", "互联网最新版输出路径（拷入离线环境做 --maven-cache）")
+	fs.Parse(args)
+	db := harden.DefaultCompanyDB()
+	if *companyDB != "" {
+		loaded, err := harden.LoadCompanyDB(*companyDB)
+		if err != nil {
+			return err
+		}
+		db = loaded
+	}
+	latest := harden.FetchMavenLatest(harden.SortedDepKeys(db))
+	wrap := map[string]map[string]string{"latest": latest}
+	raw, _ := json.MarshalIndent(wrap, "", "  ")
+	if err := os.WriteFile(*out, raw, 0644); err != nil {
+		return err
+	}
+	fmt.Printf("互联网最新版 -> %s（%d 项，可离线导入）\n", *out, len(latest))
+	for _, k := range harden.SortedDepKeys(db) {
+		fmt.Printf("  %-50s 公司%s 安全%s 最新%s\n",
+			k, db[k][0], db[k][1], latest[k])
+	}
+	return nil
+}
+
+func cmdHardenSecKnowledgeCheck(args []string) error {
+	fs := flag.NewFlagSet("harden sec knowledge check", flag.ExitOnError)
+	cfgPath := fs.String("c", "config.yaml", "配置文件")
+	host := fs.String("host", "all", "主机（IP / all / 逗号分隔）")
+	target := fs.String("target", "", "业务站点（如 https://egova.sqszhcg.com，代码类只读复现用）")
+	tokenMis := fs.String("token-mis", "", "MIS 票（代码类 CODE-02/05/06 判定用）")
+	citizenToken := fs.String("citizen-token", "", "市民 token（代码类 CODE-10 判定用）")
+	scanDir := fs.String("scan-dir", "/egova/apps,/egova/web", "远端 jar 扫描目录（逗号分隔）")
+	companyDBPath := fs.String("company-db", "", "公司版本库 JSON（缺省用内置 14 项基线）")
+	mavenCache := fs.String("maven-cache", "", "互联网最新版缓存（fetch 产物，离线导入）")
+	jsonOut := fs.String("json", "", "JSON 报告输出路径")
+	fs.StringVar(&secKeyPath, "key", "", "SSH 私钥路径（默认 ~/.ssh/id_rsa）")
+	fs.StringVar(&secPass, "pass", "", "SSH 密码（也可用 APP_UPDATER_SSH_PASS）")
+	fs.Parse(args)
+
+	db := harden.DefaultCompanyDB()
+	if *companyDBPath != "" {
+		loaded, err := harden.LoadCompanyDB(*companyDBPath)
+		if err != nil {
+			return err
+		}
+		db = loaded
+	}
+	var cache map[string]string
+	if *mavenCache != "" {
+		cache = harden.LoadMavenCache(*mavenCache)
+	}
+	depOpt := harden.KnowledgeDepOptions{
+		ScanDirs:   strings.Split(*scanDir, ","),
+		Company:    db,
+		MavenCache: cache,
+	}
+
+	cfg, err := config.Load(*cfgPath)
+	if err != nil {
+		return err
+	}
+	if err := gateValidation(cfg, false); err != nil {
+		return err
+	}
+	hosts := secHosts(cfg, *host)
+	if len(hosts) == 0 {
+		return fmt.Errorf("没有匹配的主机")
+	}
+	dial := secDialer(cfg)
+	rep := harden.NewSecReport("knowledge", hosts, time.Now())
+	for _, h := range hosts {
+		harden.SetCurrentHost(h, dial)
+		harden.RunExposureCheck(h, rep)
+		harden.RunNginxCheck(h, rep)
+		harden.RunTomcatCheck(h, rep)
+		harden.RunCNStatus(h, rep)
+		harden.RunKnowledgeDepCheck(h, depOpt, rep)
+	}
+	if *target != "" {
+		harden.RunKnowledgeCodeCheck(harden.KnowledgeCodeOptions{
+			Target: *target, TokenMis: *tokenMis, CitizenToken: *citizenToken,
+		}, rep)
+	}
+	rep.SortFindings()
 	return printSecReport(rep, *jsonOut)
 }

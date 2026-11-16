@@ -195,6 +195,7 @@ func GapTable() []GapRow {
 		{Tool: "harden_network_guard(新增)", Capability: "docker 收敛/恶意IP封禁/cron", Status: "missing→covered", Note: "eops harden sec network docker|guard|ban|unban|status|install-cron（sec_network.go）"},
 		{Tool: "harden_db_baseline(新增)", Capability: "DB 只读体检+remediation.sql", Status: "missing→covered", Note: "eops harden sec db --type mysql|dm|kingbase|highgo（sec_db.go；凭据仅环境变量，只读，输出 remediation.sql）"},
 		{Tool: "harden_lib.sh", Capability: "统一报告/备份/探测", Status: "covered", Note: "SecReport/TSV/备份 manifest（secmodel.go+secrun.go）"},
+		{Tool: "sec_knowledge_check", Capability: "知识库三类复检（代码只读复现/依赖在线离线/配置聚合）", Status: "covered", Note: "eops harden sec knowledge check|fetch（sec_knowledge.go，知识库 knowledge.json v2026-11-16）"},
 	}
 }
 
