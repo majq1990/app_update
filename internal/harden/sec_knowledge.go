@@ -51,7 +51,7 @@ func DepTable() []DepEntry {
 		{"org.apache.commons:commons-collections4", "", "4.1", "commons-collections4", false},
 		{"commons-fileupload:commons-fileupload", "", "1.6.0", "commons-fileupload", false},
 		{"org.apache.commons:commons-text", "", "1.10.0", "commons-text", false},
-		{"com.alibaba.fastjson:fastjson", "", "1.2.84", "fastjson", false},
+		{"com.alibaba:fastjson", "", "1.2.84", "fastjson", false},
 		{"com.h2database:h2", "", "2.2.220", "h2", false},
 		{"com.fasterxml.jackson.core:jackson-databind", "", "2.18.12", "jackson-databind", false},
 		{"org.apache.logging.log4j:log4j-api", "", "2.25.5", "log4j-api", false},
@@ -221,28 +221,28 @@ func splitArtifact(art string) (string, string) {
 }
 
 func mavenLatest(group, name string) string {
-	q := fmt.Sprintf(`g:"%s" AND a:"%s"`, group, name)
-	u := "https://search.maven.org/solrsearch/select?q=" + url.QueryEscape(q) + "&rows=1&wt=json"
-	c := &http.Client{Timeout: 20 * time.Second}
-	req, _ := http.NewRequest("GET", u, nil)
-	req.Header.Set("User-Agent", "eops-sec-knowledge/1.0")
-	resp, err := c.Do(req)
-	if err != nil {
-		return ""
+	// 用 maven-metadata.xml（search API 常 403；aliyun 主，中央仓兜底）。
+	path := strings.ReplaceAll(group, ".", "/") + "/" + name + "/maven-metadata.xml"
+	for _, base := range []string{"https://maven.aliyun.com/repository/public/",
+		"https://repo1.maven.org/maven2/"} {
+		c := &http.Client{Timeout: 20 * time.Second}
+		req, _ := http.NewRequest("GET", base+path, nil)
+		req.Header.Set("User-Agent", "eops-sec-knowledge/1.0")
+		resp, err := c.Do(req)
+		if err != nil {
+			continue
+		}
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		resp.Body.Close()
+		s := string(body)
+		for _, tag := range []string{"release", "latest"} {
+			re := regexp.MustCompile(`<` + tag + `>([^<]+)</` + tag + `>`)
+			if mm := re.FindStringSubmatch(s); mm != nil {
+				return strings.TrimSpace(mm[1])
+			}
+		}
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	var d struct {
-		Response struct {
-			Docs []struct {
-				LatestVersion string `json:"latestVersion"`
-			} `json:"docs"`
-		} `json:"response"`
-	}
-	if err := json.Unmarshal(body, &d); err != nil || len(d.Response.Docs) == 0 {
-		return ""
-	}
-	return d.Response.Docs[0].LatestVersion
+	return ""
 }
 
 // isVersionLike 判断是否为可比对的版本号（数字开头；占位文案如“见公司版本库”跳过比对）。
@@ -289,6 +289,53 @@ func matchDepKey(short string, db CompanyDB) string {
 	return ""
 }
 
+// verdictDepJar 单个 jar 的版本判定（远端扫描与 auto_check 导入共用）。
+func verdictDepJar(host, key, ver, path string, db CompanyDB, mavenCache map[string]string, r *SecReport) {
+	cs := db[key]
+	company, safe := cs[0], cs[1]
+	if safe == "" {
+		safe = company
+	}
+	level := SecInfo
+	result := fmt.Sprintf("%s 当前%s 公司%s 安全%s", key, ver, company, safe)
+	fixable := "no"
+	advice := "已达标；升级需研发确认兼容性后推进"
+	switch {
+	case isEOLDep(key):
+		level = SecHigh
+		result = fmt.Sprintf("%s 当前%s 无可用安全版本（EOL），须迁移/删除依赖", key, ver)
+		advice = "按清单更新方式迁移（Axis2/jakarta/删依赖），重启服务"
+	case ver != "" && isVersionLike(safe) && CompareMavenVersion(ver, safe) < 0:
+		level = SecCritical
+		result = fmt.Sprintf("%s 当前%s 低于安全版本%s", key, ver, safe)
+		advice = "升级到安全版本并回归验证（现场先定位，后续推进升级）"
+	case ver != "" && isVersionLike(company) && CompareMavenVersion(ver, company) < 0:
+		level = SecHigh
+		result = fmt.Sprintf("%s 当前%s 低于公司在用最新%s", key, ver, company)
+		advice = "与公司版本库对齐升级"
+	case ver != "" && (!isVersionLike(safe) || !isVersionLike(company)):
+		level = SecInfo
+		result = fmt.Sprintf("%s 当前%s（公司库/安全版本待补充，仅登记）", key, ver)
+		advice = "等公司版本库提供目标版本后再判定"
+	}
+	latest := ""
+	if mavenCache != nil {
+		latest = mavenCache[key]
+		if latest != "" && ver != "" && level != SecCritical && level != SecHigh {
+			cmp := 0
+			if isVersionLike(latest) {
+				cmp = CompareMavenVersion(ver, latest)
+			}
+			if cmp < 0 {
+				result += fmt.Sprintf("；互联网最新%s可评估升级", latest)
+			}
+		}
+	}
+	r.Add(SecFinding{Host: host, Category: "知识库复检-依赖", Item: key,
+		Result: result, Evidence: "jar: " + path, Level: level,
+		Advice: advice, Fixable: fixable})
+}
+
 // KnowledgeDepOptions 依赖检查选项。
 type KnowledgeDepOptions struct {
 	ScanDirs   []string          // 远端扫描目录（默认 /egova/apps /egova/web）
@@ -327,46 +374,213 @@ func RunKnowledgeDepCheck(host string, o KnowledgeDepOptions, r *SecReport) {
 			continue
 		}
 		seen[key+"@"+ver] = true
-		cs := db[key]
-		company, safe := cs[0], cs[1]
-		if safe == "" {
-			safe = company
+		verdictDepJar(host, key, ver, p, db, o.MavenCache, r)
+	}
+}
+
+// vulnJarFile vulnerable-jar.py 原始 JSON 的单个命中。
+type vulnJarFile struct {
+	Path    string `json:"jar_path"`
+	Name    string `json:"jar_name"`
+	File    string `json:"jar_filename"`
+	Version string `json:"current_version"`
+	AutoMin string `json:"minimum_safe_version"`
+}
+
+// ParseVulnJarAutocheck 解析 auto_check 明细（vulnerable-jar.py 原始 JSON；
+// 兼容 eops inspect 报告——只有汇总无明细时返回 warn）。
+func ParseVulnJarAutocheck(data []byte) ([]JarHit, string, error) {
+	payload := extractLastJSON(data)
+	if payload == nil {
+		return nil, "", fmt.Errorf("未找到 JSON 结果")
+	}
+	// 形态1：vulnerable-jar.py 原始输出
+	var raw struct {
+		Check struct {
+			Jars []vulnJarFile `json:"vulnerable_jars"`
+		} `json:"vulnerable_jar_check"`
+	}
+	if err := json.Unmarshal(payload, &raw); err == nil && raw.Check.Jars != nil {
+		var out []JarHit
+		for _, j := range raw.Check.Jars {
+			name := j.Name
+			if name == "" {
+				name = j.File
+			}
+			out = append(out, JarHit{Path: j.Path, Short: name, Version: j.Version})
 		}
-		if isEOLDep(key) {
-			r.Add(SecFinding{Host: host, Category: "知识库复检-依赖", Item: key,
-				Result:   fmt.Sprintf("%s 当前%s 无可用安全版本（EOL），须迁移/删除依赖", key, ver),
-				Evidence: "jar: " + p, Level: SecHigh,
-				Advice: "按清单更新方式迁移（Axis2/jakarta/删依赖），重启服务", Fixable: "no"})
+		return out, "", nil
+	}
+	// 形态2：eops inspect 报告
+	var rep struct {
+		Results []struct {
+			Check   string `json:"check"`
+			Metrics []struct {
+				Name  string `json:"name"`
+				Value string `json:"value"`
+			} `json:"metrics"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(payload, &rep); err != nil {
+		return nil, "", fmt.Errorf("JSON 解析失败: %v", err)
+	}
+	for _, res := range rep.Results {
+		if res.Check == "ac-vulnerable-jar" {
+			total := ""
+			for _, m := range res.Metrics {
+				if m.Name == "vulnerable_jars" {
+					total = m.Value
+				}
+			}
+			return nil, "inspect 报告只有汇总（vulnerable_jars=" + total +
+				"），无逐 jar 明细；请改用 vulnerable-jar.py 原始 JSON 导入", nil
+		}
+	}
+	return nil, "", fmt.Errorf("既不是 vulnerable-jar 明细，也不是 inspect 报告")
+}
+
+// extractLastJSON 取字节流中最后一个完整 {...} JSON 对象（兼容进度行前缀）。
+func extractLastJSON(data []byte) []byte {
+	s := string(data)
+	start, depth := -1, 0
+	inStr, esc := false, false
+	last := ""
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if inStr {
+			if esc {
+				esc = false
+			} else if c == '\\' {
+				esc = true
+			} else if c == '"' {
+				inStr = false
+			}
 			continue
 		}
-		level := SecInfo
-		result := fmt.Sprintf("%s 当前%s 公司%s 安全%s", key, ver, company, safe)
-		fixable := "no"
-		advice := "已达标；升级需研发确认兼容性后推进"
-		switch {
-		case ver != "" && isVersionLike(safe) && CompareMavenVersion(ver, safe) < 0:
-			level = SecCritical
-			result = fmt.Sprintf("%s 当前%s 低于安全版本%s", key, ver, safe)
-			advice = "升级到安全版本并回归验证（现场先定位，后续推进升级）"
-		case ver != "" && isVersionLike(company) && CompareMavenVersion(ver, company) < 0:
-			level = SecHigh
-			result = fmt.Sprintf("%s 当前%s 低于公司在用最新%s", key, ver, company)
-			advice = "与公司版本库对齐升级"
-		case ver != "" && (!isVersionLike(safe) || !isVersionLike(company)):
-			level = SecInfo
-			result = fmt.Sprintf("%s 当前%s（公司库/安全版本待补充，仅登记）", key, ver)
-			advice = "等公司版本库提供目标版本后再判定"
-		}
-		latest := ""
-		if o.MavenCache != nil {
-			latest = o.MavenCache[key]
-			if latest != "" && ver != "" && CompareMavenVersion(ver, latest) < 0 && level != SecCritical && level != SecHigh {
-				result += fmt.Sprintf("；互联网最新%s可评估升级", latest)
+		switch c {
+		case '"':
+			inStr = true
+		case '{':
+			if depth == 0 {
+				start = i
+			}
+			depth++
+		case '}':
+			if depth > 0 {
+				depth--
+				if depth == 0 && start >= 0 {
+					last = s[start : i+1]
+					start = -1
+				}
 			}
 		}
-		r.Add(SecFinding{Host: host, Category: "知识库复检-依赖", Item: key,
-			Result: result, Evidence: "jar: " + p, Level: level,
-			Advice: advice, Fixable: fixable})
+	}
+	if last == "" {
+		return nil
+	}
+	return []byte(last)
+}
+
+// RunKnowledgeDepAutocheck 依赖类：直接导入 auto_check 明细判定（不远端扫描）。
+func RunKnowledgeDepAutocheck(host string, items []JarHit, o KnowledgeDepOptions, r *SecReport) {
+	db := o.Company
+	if db == nil {
+		db = DefaultCompanyDB()
+	}
+	if len(items) == 0 {
+		r.Add(SecFinding{Host: host, Category: "知识库复检-依赖", Item: "auto_check 导入",
+			Result: "明细为空（auto_check 侧 0 命中或只有汇总）", Level: SecInfo, Fixable: "no"})
+		return
+	}
+	seen := map[string]bool{}
+	for _, it := range items {
+		key := matchDepKey(it.Short, db)
+		if key == "" {
+			r.Add(SecFinding{Host: host, Category: "知识库复检-依赖", Item: it.Short,
+				Result:   "清单未收录（auto_check 命中但公司库无此组件），先在 AI 表格补录后 sync",
+				Evidence: "jar: " + it.Path, Level: SecMedium,
+				Advice: "补录 AI 表格「三方依赖安全版本清单」", Fixable: "no"})
+			continue
+		}
+		if seen[key+"@"+it.Version] {
+			continue
+		}
+		seen[key+"@"+it.Version] = true
+		verdictDepJar(host, key, it.Version, it.Path, db, o.MavenCache, r)
+	}
+}
+
+// ParsePortTopics 解析 security-port.sh 原始 JSON 的 topics（auto_check 直接导入）。
+func ParsePortTopics(data []byte) (map[string]string, error) {
+	payload := extractLastJSON(data)
+	if payload == nil {
+		return nil, fmt.Errorf("未找到 JSON 结果")
+	}
+	var doc struct {
+		Topics map[string][]map[string]string `json:"topics"`
+	}
+	if err := json.Unmarshal(payload, &doc); err != nil {
+		return nil, fmt.Errorf("JSON 解析失败: %v", err)
+	}
+	if len(doc.Topics) == 0 {
+		return nil, fmt.Errorf("不是 security-port.sh 的 topics 格式")
+	}
+	out := map[string]string{}
+	for _, arr := range doc.Topics {
+		for _, blk := range arr {
+			for k, v := range blk {
+				short := k
+				if i := strings.Index(k, "::"); i >= 0 {
+					short = k[:i]
+				}
+				// 短键形如 "01:ipset_egova_vpc_nets_status"；去序号前缀
+				if j := strings.Index(short, ":"); j >= 0 {
+					short = short[j+1:]
+				}
+				out[short] = strings.TrimSpace(v)
+			}
+		}
+	}
+	return out, nil
+}
+
+func portGood(v string) bool { return strings.ToUpper(strings.TrimSpace(v)) == "YES" }
+
+// RunKnowledgePortAutocheck 配置类：直接导入 security-port 状态判定（不远端采集）。
+func RunKnowledgePortAutocheck(host string, m map[string]string, r *SecReport) {
+	const cat = "知识库复检-配置"
+	const src = "auto_check security-port"
+	yn := func(key, name string, invert bool) {
+		v, ok := m[key]
+		if !ok || v == "" {
+			r.Add(SecFinding{Host: host, Category: cat, Item: name,
+				Result: "状态未知（auto_check 未给出）", Evidence: src, Level: SecInfo, Fixable: "no"})
+			return
+		}
+		good := portGood(v)
+		if invert {
+			good = !good
+		}
+		if good {
+			r.Add(SecFinding{Host: host, Category: cat, Item: name,
+				Result: "正常（" + v + "）", Evidence: src, Level: SecInfo, Fixable: "no"})
+		} else {
+			r.Add(SecFinding{Host: host, Category: cat, Item: name,
+				Result: "异常（" + v + "）", Evidence: src, Level: SecHigh,
+				Advice: "按端口加固基线处置（ipset/拦截链/默认丢弃）", Fixable: "yes"})
+		}
+	}
+	yn("ipset_egova_vpc_nets_status", "VPC 网段集", false)
+	yn("ipset_egova_local_ports_status", "本地端口集", false)
+	yn("ipset_egova_expose_ports_status", "暴露端口集", false)
+	yn("vpc_access_rule", "VPC 放行规则", false)
+	yn("exposed_ports_rule", "暴露端口规则", false)
+	yn("local_ports_config", "监听端口收敛", false)
+	yn("default_drop_rule", "默认丢弃", false)
+	yn("firewalld_disabled", "firewalld 关闭", false)
+	if n, ok := m["vpc_nets_count"]; ok && n != "" {
+		r.Add(SecFinding{Host: host, Category: cat, Item: "VPC 网段数",
+			Result: "VPC 网段 " + n + " 条", Evidence: src, Level: SecInfo, Fixable: "no"})
 	}
 }
 

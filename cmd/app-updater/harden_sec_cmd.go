@@ -622,8 +622,10 @@ func cmdHardenSecKnowledgeCheck(args []string) error {
 	tokenMis := fs.String("token-mis", "", "MIS 票（代码类 CODE-02/05/06 判定用）")
 	citizenToken := fs.String("citizen-token", "", "市民 token（代码类 CODE-10 判定用）")
 	scanDir := fs.String("scan-dir", "/egova/apps,/egova/web", "远端 jar 扫描目录（逗号分隔）")
-	companyDBPath := fs.String("company-db", "", "公司版本库 JSON（缺省用内置 14 项基线）")
+	companyDBPath := fs.String("company-db", "", "公司版本库 JSON（缺省用内置 28 项 jar 基线）")
 	mavenCache := fs.String("maven-cache", "", "互联网最新版缓存（fetch 产物，离线导入）")
+	autocheckJar := fs.String("autocheck-jar", "", "auto_check 直接导入：vulnerable-jar.py 原始 JSON（明细；给出则跳过远端 jar 扫描）")
+	autocheckPort := fs.String("autocheck-port", "", "auto_check 直接导入：security-port.sh 原始 stdout JSON")
 	jsonOut := fs.String("json", "", "JSON 报告输出路径")
 	fs.StringVar(&secKeyPath, "key", "", "SSH 私钥路径（默认 ~/.ssh/id_rsa）")
 	fs.StringVar(&secPass, "pass", "", "SSH 密码（也可用 APP_UPDATER_SSH_PASS）")
@@ -660,13 +662,48 @@ func cmdHardenSecKnowledgeCheck(args []string) error {
 	}
 	dial := secDialer(cfg)
 	rep := harden.NewSecReport("knowledge", hosts, time.Now())
+	var autoJars []harden.JarHit
+	if *autocheckJar != "" {
+		raw, rerr := os.ReadFile(*autocheckJar)
+		if rerr != nil {
+			return rerr
+		}
+		items, warn, perr := harden.ParseVulnJarAutocheck(raw)
+		if perr != nil {
+			return perr
+		}
+		if warn != "" {
+			fmt.Println("autocheck 提示：", warn)
+		}
+		autoJars = items
+	}
+	var portTopics map[string]string
+	if *autocheckPort != "" {
+		raw, rerr := os.ReadFile(*autocheckPort)
+		if rerr != nil {
+			return rerr
+		}
+		m, perr := harden.ParsePortTopics(raw)
+		if perr != nil {
+			return perr
+		}
+		portTopics = m
+	}
 	for _, h := range hosts {
 		harden.SetCurrentHost(h, dial)
 		harden.RunExposureCheck(h, rep)
 		harden.RunNginxCheck(h, rep)
+		harden.RunNginxNacosProxyCheck(h, rep)
 		harden.RunTomcatCheck(h, rep)
 		harden.RunCNStatus(h, rep)
-		harden.RunKnowledgeDepCheck(h, depOpt, rep)
+		if autoJars != nil {
+			harden.RunKnowledgeDepAutocheck(h, autoJars, depOpt, rep)
+		} else {
+			harden.RunKnowledgeDepCheck(h, depOpt, rep)
+		}
+		if portTopics != nil {
+			harden.RunKnowledgePortAutocheck(h, portTopics, rep)
+		}
 	}
 	if *target != "" {
 		harden.RunKnowledgeCodeCheck(harden.KnowledgeCodeOptions{
