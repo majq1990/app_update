@@ -90,12 +90,13 @@ func runInteractive() {
 5. 项目巡检（OS / 安全 / 中间件）
 6. 监控运维（诊断 / 白名单修复 / 部署清单）
 7. 安全加固（只读清单 / 建议片段 / 台账）
+8. 三方依赖安全检查（只读：版本比对 / 问题清单 / 中间件地址）
 —— 配置与接入 ——
-8. 配置管理（识别一键 / 表格导入 / 导出）
-9. 免密初始化
+9. 配置管理（识别一键 / 表格导入 / 导出）
+10. 免密初始化
 0. 退出
 `, versionString(), curCfgPath)
-		switch getIntChoice("请选择", 0, 9) {
+		switch getIntChoice("请选择", 0, 10) {
 		case 1:
 			menuUpdate()
 		case 2:
@@ -111,8 +112,10 @@ func runInteractive() {
 		case 7:
 			menuHarden()
 		case 8:
-			menuConfig()
+			menuDepsec()
 		case 9:
+			menuConfig()
+		case 10:
 			menuSetupSSH()
 		case 0:
 			fmt.Println("再见。")

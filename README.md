@@ -16,8 +16,24 @@
 - **Excel 配置**：模板生成 / 导入校验 / 反向导出，适合现场人工填写与核对
 - **运维扩展**：日志运维（汇聚/清理/切割体检与下发）、备份运维（现场留包/完整性校验/保留期清理/台账导出）、
   项目巡检（32 项：20 项自研 + 12 项 auto-check 资产——安全 6 + OS 1 + 中间件 5）、监控诊断（agent/proxy/PSK/备份目录/云连通性）、
-  安全加固清单（只读建议，不改网络与内核）
+  安全加固清单（只读建议，不改网络与内核）、**三方依赖安全检查**（安全版本清单比对 / 问题清单 / 中间件地址）
 - **安全**：所有改服务器的操作先 dry-run，需 `--yes` 才执行；回滚保护运行期日志
+
+### 三方依赖安全检查（只读）
+
+按内嵌的「安全版本清单」（93 条：73 jar + 20 支撑软件）比对目标机现场版本，输出问题清单。
+**只检测、只登记、只给建议**：中间件可联网升级；代码内 jar 一律提单由研发更新，工具不下载不替换不重启。
+
+```bash
+./eops depsec scan  -c config.yaml --host all --out ./logs/depsec   # 出 Markdown+CSV 问题清单
+./eops depsec query -c config.yaml --host 10.0.0.11 --target log4j-core-2.17.1.jar
+./eops depsec fetch -c config.yaml --host 10.0.0.11 --target redis  # 只给国内地址
+./eops depsec fetch -c config.yaml --host 10.0.0.11 --target redis --download  # 中间件才可下载
+./eops depsec list                                                  # 口径说明
+```
+
+交互入口：主菜单 `8. 三方依赖安全检查`（目标机检测 / 单组件判定 / 中间件地址 / 口径说明）。
+脚本与清单随二进制内嵌，下发到目标机 `/tmp/eops_depsec`，不依赖现场已有文件。
 
 ## 快速开始
 
@@ -247,6 +263,7 @@ internal/backup/       备份运维（tar / mysqldump / 校验 / 保留期 / 台
 internal/inspect/      项目巡检（20 项只读检查：OS / 安全 / 中间件）
 internal/monitor/      监控诊断（agent / proxy / PSK / 备份目录 / 云连通性）
 internal/harden/       安全加固清单（巡检发现 → 建议片段 / 台账，首期不改配置）
+internal/depsec/       三方依赖安全检查（内嵌安全版本清单 + 只读检测脚本，只登记不改动）
 testdata/oneinstall/   真实部署清单快照（测试夹具）
 dist/                  发布包（二进制由 .gitignore 排除，仅保留清单）
 ```

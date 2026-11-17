@@ -100,6 +100,13 @@ const usage = `eops — 统一运维工具（应用更新/回滚 · 日志 · �
       安全工具箱（对齐 oneinstall_v2）：exposure 未授权探测 + nginx/tomcat 基线
       check 只读体检；fix 默认 dry-run、--yes 执行（改前逐文件备份，nginx -t 失败自动还原）
       rollback 按备份 manifest 回滚；gap 输出 oneinstall→eops 能力对照表
+  eops depsec scan -c config.yaml [--host IP|all] [--dirs /egova,/opt] [--no-embedded] [--out 目录]
+      三方依赖安全检查（只读）：按安全版本清单比对现场版本，输出问题清单（Markdown+CSV）
+  eops depsec query -c config.yaml --host IP --target <组件|jar文件名>
+      单组件版本判定（VULNERABLE / OK / 无可用安全版本 / 未收录）
+  eops depsec fetch -c config.yaml --host IP --target <组件> [--download]
+      中间件下载地址查询；--download 才取件（jar 类脚本直接拒绝，rc=5）
+  eops depsec list                      检查项与处置口径说明
   eops version                          查看版本
 `
 
@@ -192,6 +199,8 @@ func main() {
 		err = cmdMonitor(cliArgs[2:])
 	case "harden":
 		err = cmdHarden(cliArgs[2:])
+	case "depsec":
+		err = cmdDepsec(cliArgs[2:])
 	case "version", "-v", "--version":
 		fmt.Println(versionString())
 	case "help", "-h", "--help":

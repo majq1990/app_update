@@ -1,0 +1,3 @@
+# 内嵌资产随二进制下发到 Linux 执行，必须保持 LF（core.autocrlf=true 下会被转 CRLF）
+internal/depsec/assets/*.sh text eol=lf
+internal/depsec/assets/*.flat text eol=lf
