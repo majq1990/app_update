@@ -64,8 +64,10 @@ func cmdHardenSec(args []string) error {
 		return cmdHardenSecNetwork(args[1:])
 	case "knowledge":
 		return cmdHardenSecKnowledge(args[1:])
+	case "init":
+		return cmdHardenSecInit(args[1:])
 	default:
-		return fmt.Errorf("未知 sec 子命令: %s（可用 check|fix|rollback|appconfig|db|os|network|knowledge|gap）", args[0])
+		return fmt.Errorf("未知 sec 子命令: %s（可用 init|check|fix|rollback|appconfig|db|os|network|knowledge|gap）", args[0])
 	}
 }
 
