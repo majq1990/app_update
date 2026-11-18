@@ -221,10 +221,15 @@ func init() {
 					}
 					args = a
 				}
+				// 脚本内容经 stdin 下发后先落临时文件再执行。
+				// 不能直接 `bash -s`：脚本里的 jps/top/read 等子进程会抢读同一个 stdin，
+				// 把后续脚本内容吃掉，导致只输出前几行、JSON 缺失（zjbim 实测）。
+				run := interp + ` "$f"`
 				if args != "" {
-					return interp + " -s " + spec.file + " " + args, nil
+					run += " " + args
 				}
-				return interp + " -s " + spec.file, nil
+				return `sh -c 'f=$(mktemp /tmp/eops-asset-XXXXXX); cat > "$f"; ` +
+					run + `; rc=$?; rm -f "$f"; exit $rc'`, nil
 			},
 			Evaluate: func(e Env, out string) ([]Metric, []Finding, error) {
 				switch spec.kind {
@@ -233,11 +238,33 @@ func init() {
 				case "vulnjar":
 					return parseVulnJarJSON(e.Target.Host.Host, dim, []byte(out))
 				default:
-					return parseLegacyTopics(e.Target.Host.Host, spec.name, dim, []byte(out))
+					ms, fs, err := parseLegacyTopics(e.Target.Host.Host, spec.name, dim, []byte(out))
+					if err != nil && spec.name == "ac-middleware" && looksNoJDK(out) {
+						// 无 JDK 时脚本自身无法产出 JSON（jps 缺失），这不是执行故障，
+						// 记录一条提示即可，避免整台机器的中间件维度全是"执行失败"。
+						return nil, []Finding{{
+							Host: e.Target.Host.Host, Target: e.Target.Host.Host,
+							Check: spec.name, Dimension: string(dim), Severity: SevInfo,
+							Message: "未安装 JDK，跳过中间件体检（无 java/jps，Tomcat/TongWeb 等不适用）",
+						}}, nil
+					}
+					return ms, fs, err
 				}
 			},
 		})
 	}
+}
+
+// looksNoJDK 判断输出是否属于"目标机没有 JDK"导致的脚本自身失败。
+func looksNoJDK(out string) bool {
+	if strings.Contains(out, "jps：未找到") || strings.Contains(out, "jps: not found") ||
+		strings.Contains(out, "jps: command not found") {
+		return true
+	}
+	if strings.Contains(out, "java: not found") || strings.Contains(out, "java：未找到") {
+		return true
+	}
+	return false
 }
 
 // parseKernelCveJSON 解析 check-kernel-cve.sh --json 的扁平 schema。

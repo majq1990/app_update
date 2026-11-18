@@ -10,6 +10,7 @@
 package inspect
 
 import (
+	"bytes"
 	"fmt"
 	"sort"
 	"strings"
@@ -364,6 +365,17 @@ func runOneScoped(conn Conn, env Env, c Check, hostScoped bool) Result {
 			return res
 		}
 		out, err = sr.RunWithStdin(cmdStr, script)
+		// 资产脚本常用退出码表达结论（0 正常 / 1 有异常 / 2 严重），
+		// 只要输出有内容就继续解析；解析成功则不算执行失败。
+		if err != nil && len(bytes.TrimSpace([]byte(out))) == 0 {
+			res.Err = "执行失败: " + err.Error()
+			return res
+		}
+		if err != nil {
+			// 有输出：把退出码降级为提示（parse 结果才是结论），避免把
+			// "VULNERABLE=rc1" 这类正常语义当成执行故障。
+			err = nil
+		}
 	} else {
 		out, err = conn.Run(cmdStr)
 	}

@@ -133,8 +133,8 @@ func TestAssetCheckEndToEndViaStdin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(cmd, "bash -s security-agent.sh") {
-		t.Fatalf("命令形态错误: %s", cmd)
+	if !strings.Contains(cmd, "cat > \"$f\"") || !strings.Contains(cmd, `bash "$f"`) {
+		t.Fatalf("命令形态错误（应落临时文件后执行，避免子进程抢 stdin）: %s", cmd)
 	}
 	conn := &stdinFakeConn{out: `{"basic":{},"topics":{"01:java_process_count":[{"01:count::DATA_eq_0:#17730": 0}],"02:processes":[]}}`}
 	res := runOneScoped(conn, Env{Target: Target{Host: config.Host{Host: "10.0.0.1"}, SupportKind: "security"}}, c, true)
@@ -177,7 +177,7 @@ func TestVulnJarAppliesAndArgs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(cmd, "python3 -s vulnerable-jar.py") ||
+	if !strings.Contains(cmd, `python3 "$f"`) ||
 		!strings.Contains(cmd, `--scan-dirs '/egova/apps/basic/eurbanpro'`) ||
 		!strings.Contains(cmd, "--no-containers") {
 		t.Fatalf("扫描命令不合规: %s", cmd)

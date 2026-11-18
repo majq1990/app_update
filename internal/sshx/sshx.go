@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pkg/sftp"
@@ -16,6 +17,26 @@ import (
 
 	"github.com/majq1990/app-updater-go/internal/syncx"
 )
+
+// lockedBuf 是并发安全的输出缓冲：ssh.Session 会为 stdout/stderr 各起一个
+// copy 协程，两者写同一个 bytes.Buffer 会产生数据竞争，表现为输出中夹杂大段
+// NUL 字节、JSON 被截断（zjbim 实测）。这里加锁串行化。
+type lockedBuf struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (l *lockedBuf) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuf) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
+}
 
 // RunWithStdin 在远端执行 cmd，并把 stdin 内容喂给该命令的标准输入。
 // 用于「脚本作为数据下发」（如巡检资产脚本 bash -s / python3 -），
@@ -31,7 +52,7 @@ func (c *Client) RunWithStdin(cmd string, stdin []byte) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("获取 stdin 失败: %w", err)
 	}
-	var outBuf bytes.Buffer
+	var outBuf lockedBuf
 	sess.Stdout = &outBuf
 	sess.Stderr = &outBuf
 
