@@ -1,3 +1,5 @@
-# 内嵌资产随二进制下发到 Linux 执行，必须保持 LF（core.autocrlf=true 下会被转 CRLF）
+# shell 脚本与内嵌资产在 Linux/WSL 执行，必须保持 LF（core.autocrlf=true 下会被转 CRLF）
+*.sh text eol=lf
 internal/depsec/assets/*.sh text eol=lf
 internal/depsec/assets/*.flat text eol=lf
+testdata/**/*.sh text eol=lf
