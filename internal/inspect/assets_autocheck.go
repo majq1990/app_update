@@ -12,6 +12,7 @@ package inspect
 //   vulnjar   —— check_vulnerable_jar.py 的扫描汇总 schema
 
 import (
+	"bytes"
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -78,7 +79,16 @@ var assetScripts = map[string][]byte{
 
 func assetScript(file string) ([]byte, bool) {
 	b, ok := assetScripts[file]
-	return b, ok
+	if !ok {
+		return nil, false
+	}
+	// 防御：Windows 检出（core.autocrlf=true）会把脚本转成 CRLF，go:embed 原样打包后
+	// 在 Linux 上执行会报 "$'\r': 未找到命令"。这里统一归一为 LF，保证跨平台构建一致。
+	if bytes.ContainsRune(b, '\r') {
+		b = bytes.ReplaceAll(b, []byte("\r\n"), []byte("\n"))
+		b = bytes.ReplaceAll(b, []byte("\r"), []byte("\n"))
+	}
+	return b, true
 }
 
 // AutocheckManifest 供文档/CLI 展示资产同步状态。
